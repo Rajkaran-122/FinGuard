@@ -10,3 +10,4 @@
 2025-07-05 17:44:26: Update README with system design details
 2025-07-05 09:32:30: Fix minor bug in currency conversion
 2025-07-07 19:32:24: Update API schemas for better validation
+2025-07-07 13:42:18: Add audit log for user transactions

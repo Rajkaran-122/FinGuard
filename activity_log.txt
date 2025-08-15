@@ -75,3 +75,4 @@
 2025-08-15 09:52:06: Improve cache-aside implementation
 2025-08-15 20:47:49: Add integration tests for API endpoints
 2025-08-15 21:49:11: Update README with system design details
+2025-08-15 21:48:08: Fix edge case in date range filtering

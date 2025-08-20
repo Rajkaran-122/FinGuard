@@ -85,3 +85,4 @@
 2025-08-19 12:20:31: Fix minor bug in currency conversion
 2025-08-19 16:56:18: Optimize database queries for dashboard metrics
 2025-08-20 19:46:59: Fix minor bug in currency conversion
+2025-08-20 10:14:11: Add unit tests for portfolio calculation

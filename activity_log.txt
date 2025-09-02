@@ -109,3 +109,4 @@
 2025-08-30 18:35:28: Update API schemas for better validation
 2025-08-30 14:18:50: Improve error handling in authentication
 2025-08-30 15:14:06: Add security middleware for CSRF protection
+2025-09-02 09:31:25: Add unit tests for portfolio calculation

@@ -175,3 +175,4 @@
 2025-10-07 12:14:39: Update dependencies to latest versions
 2025-10-07 18:23:21: Fix minor bug in currency conversion
 2025-10-08 16:33:07: Fix minor bug in currency conversion
+2025-10-08 20:14:47: Update documentation for deployment

@@ -10,10 +10,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
 from app.core.database import engine, Base
 from app.core.logging import StructuredLoggingMiddleware
+from app.core.rate_limit import limiter
 from app.routers import auth, users, records, summary
 
 @asynccontextmanager
@@ -42,6 +45,10 @@ app.add_middleware(
 
 # Structured JSON Logging
 app.add_middleware(StructuredLoggingMiddleware)
+
+# Rate Limiter
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Include Routers
 app.include_router(auth.router)

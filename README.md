@@ -1,86 +1,131 @@
-# FinGuard — Finance Data Processing & Access Control Backend
+# FinGuard — Elite Finance Data Processing Backend
 
-A production-grade RESTful backend service powering a multi-role finance dashboard. FinGuard manages financial records, enforces strict role-based access control (RBAC), and provides aggregated analytics endpoints.
+FinGuard is a production-grade RESTful API backend engineered to power a multi-role finance dashboard. The system manages organizational financial records, enforces strict Role-Based Access Control (RBAC), and computes powerful database-driven dashboard aggregations.
 
-## 🚀 Features
+## 🚀 Key Differentiators & Elite Standards
 
-- **Robust Authentication:** JWT-based stateless authentication with `bcrypt` password hashing.
-- **Strict RBAC:** Role-based access control enforced gracefully at the API route level via FastAPI's `Depends` injection (Roles: `Viewer`, `Analyst`, `Admin`).
-- **Data Integrity:** Fully ACID-compliant SQLite backend with WAL (Write-Ahead-Logging) mode enabled for read/write concurrency. Seamless upgrade path to PostgreSQL via SQLAlchemy.
-- **Strict Validation:** Pydantic `v2` enforces type safety and boundaries on all inputs and outputs.
-- **Interactive Documentation:** Automatically generated OpenAPI UI at `/docs`.
-- **Analytics Ready:** High-performance database-layer aggregations for summaries, trends, and categorized breakdowns.
+Unlike boilerplate CRUD applications, FinGuard is built with severe architectural and security boundaries in mind:
 
-## 🛠️ Technology Stack
+- **Strict Boundary Layers:** Controllers (Routers) never evaluate raw SQL logic. Requests flow linearly: `Router -> Service Layer -> Repository Layer -> Database`.
+- **RBAC Dependency Injection:** User permissions are enforced proactively before business logic handles memory using FastAPI's intuitive `Depends()` injection system.
+- **Defensive API Gateways:** Credentials stuffing is actively thwarted utilizing `slowapi` rate limiting explicitly defined against login/registration pipeline boundaries.
+- **Structured JSON Observability:** Overridden native stdout handling via global Middleware traces appending `uuid4` tracking per request instance.
+- **SQL Aggregations vs N+1 Processing:** Time-bucketed dashboard metrics (`GetSummary`, `GetCategories`) evaluate directly inside the `SQLite` engine minimizing memory I/O and entirely avoiding python-space iterations over vast data records.
 
-- **Language:** Python 3.12+
-- **Framework:** FastAPI
-- **Database:** SQLite (local dev/testing) / PostgreSQL (production compatibility)
-- **ORM:** SQLAlchemy 2.0
-- **Validation:** Pydantic
-- **Testing:** Pytest & HTTPX
+---
 
-## 🏎️ Quick Start (5-Minute Setup)
+## 🏗️ System Architecture
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/Rajkaran-122/FinGuard.git
-   cd FinGuard
-   ```
+FinGuard leverages a strictly typed **Python 3.12 + FastAPI + SQLAlchemy** stack. 
 
-2. **Create and activate a virtual environment:**
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows use: venv\Scripts\activate
-   ```
+```mermaid
+graph TD
+    Client[Web / Postman] -->|HTTP Request| API[FastAPI Routers]
+    API -->|Depends| Auth[RBAC Security Checks]
+    API -->|Validated Schema| Services[Business Logic Layer]
+    Services -->|Method Triggers| Repositories[Database Access Layer]
+    Repositories -->|SQLAlchemy ORM| DB[(SQLite WAL Database)]
+```
 
-3. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+> **IMPORTANT:** For deep-dive design justifications and tradeoffs (Why FastAPI vs Django? Why SQLite WAL?), view the dedicated **[ARCHITECTURE.md](ARCHITECTURE.md)** document.
 
-4. **Initialize environment variables:**
-   ```bash
-   cp .env.example .env
-   # Ensure you set a custom JWT_SECRET inside .env
-   ```
+---
 
-5. **Seed the database:**
-   Automatically creates tables, testing users, and 50 random financial records:
-   ```bash
-   python scripts/seed.py
-   ```
+## 🛠️ Quick Start (Developer Setup)
 
-   *Seeded Credentials:*
-   - **Admin:** `admin@finance.dev` | `Admin@123`
-   - **Analyst:** `analyst@finance.dev` | `Analyst@123`
-   - **Viewer:** `viewer@finance.dev` | `Viewer@123`
+### Prerequisites:
+- Python 3.11+
+- Git
 
-6. **Run the server:**
-   ```bash
-   uvicorn app.main:app --reload
-   ```
+### 1. Installation:
+```bash
+git clone https://github.com/Rajkaran-122/FinGuard.git
+cd FinGuard
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env
+```
 
-7. **Explore the API:**
-   Navigate to [http://localhost:8000/docs](http://localhost:8000/docs) to access the interactive Swagger UI.
+### 2. Auto-Seeding Database:
+Instead of jumping through manual REST POSTing to evaluate structural integrity, execute the built-in database seeder script. This instantly provisions an SQLite data volume complete with multi-role user accounts and 50 randomized financial records cleanly mapping backwards context.
 
-## 🏗️ Architecture Design
+```bash
+python scripts/seed.py
+```
+> **Test Accounts Created Automatically:**
+> - **Admin:** `admin@finance.dev` | `Admin@123`
+> - **Analyst:** `analyst@finance.dev` | `Analyst@123` 
+> - **Viewer:** `viewer@finance.dev` | `Viewer@123`
 
-The project uses a clean layered architecture to enforce separation of concerns:
+### 3. Execution:
+```bash
+uvicorn app.main:app --reload
+```
+View the generated **OpenAPI Swagger UI interface** dynamically hooked off model validation schemas directly at: `http://localhost:8000/docs`.
 
-- **Routers (`app/routers/`):** REST API endpoints mapping to HTTP actions. They handle request routing and instantly delegate work to the service layer.
-- **Services (`app/services/`):** Houses pure business logic, permissions bounding, and transactional orchestration.
-- **Repositories (`app/repositories/`):** Encapsulates SQLAlchemy database logic. Provides direct data interaction APIs isolating SQL specifics from the business logic.
-- **Schemas (`app/schemas/`):** Pydantic models for request/response serialization and structural validation.
-- **Models (`app/models/`):** SQLAlchemy ORM declarative classes representing actual database schema.
+---
 
-## 🧪 Testing
+## 🔌 API Documentation & Usage Samples
 
-The API features integration tests leveraging an isolated in-memory SQLite database.
-Run the full suite using:
+Below are foundational examples demonstrating critical RESTful flows.
+
+*(Note: The codebase contains an exportable `FinGuard_Postman_Collection.json`. Importing this natively configures authentication state arrays managing tokens dynamically alleviating manual evaluation friction).*
+
+### 1. Authenticate (Login)
+```bash
+curl -X 'POST' \
+  'http://localhost:8000/api/auth/login' \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d 'username=admin@finance.dev&password=Admin@123'
+```
+*Response:*
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR...",
+  "token_type": "bearer"
+}
+```
+
+### 2. Create a Financial Record (Admin Status Required)
+*Requires Authorization Token.*
+```bash
+curl -X 'POST' \
+  'http://localhost:8000/api/records/' \
+  -H 'Authorization: Bearer <YOUR_ACCESS_TOKEN>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "amount": 2450.50,
+  "type": "income",
+  "category": "Consulting",
+  "date": "2025-01-20",
+  "notes": "Q1 Retainer"
+}'
+```
+
+### 3. Fetch Dashboard Summary
+Leverages raw database `SUM` aggregations instead of python array evaluation.
+```bash
+curl -X 'GET' \
+  'http://localhost:8000/api/dashboard/summary' \
+  -H 'Authorization: Bearer <YOUR_ACCESS_TOKEN>'
+```
+*Response:*
+```json
+{
+  "total_income": 85000.0,
+  "total_expenses": 32000.0,
+  "net_balance": 53000.0,
+  "record_count": 48
+}
+```
+
+---
+
+## 🧪 Validations & Dynamic Testing
+
+A fully decoupled Pytest integration suite overrides dependency engines securely injecting in-memory unpersisted SQLite scopes per testing function. This ensures test reliability bypassing explicit environment tearing.
+
 ```bash
 python -m pytest tests/ -v
 ```
-
-## 📜 Assignment Context
-This backend was built strictly adhering to the requirements provided in the *Finance Data Processing and Access Control Backend BRD*.

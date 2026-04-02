@@ -68,16 +68,19 @@ def get_current_user(
     return user
 
 
-def require_role(*allowed_roles: str) -> Callable:
+def require_permissions(*required_permissions: str) -> Callable:
     """
-    Returns a dependency that checks the current user's role.
-    Usage: Depends(require_role("admin", "analyst"))
+    Returns a dependency that checks the current user's permissions.
+    Usage: Depends(require_permissions("records:write", "dashboard:view"))
     """
-    def role_checker(current_user=Depends(get_current_user)):
-        if current_user.role.value not in allowed_roles:
+    def permission_checker(current_user=Depends(get_current_user)):
+        user_perms = current_user.permissions or []
+        # Check if user has ALL the required permissions
+        missing = [p for p in required_permissions if p not in user_perms]
+        if missing:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Access denied. Required role(s): {', '.join(allowed_roles)}",
+                detail=f"Access denied. Missing permissions: {', '.join(missing)}",
             )
         return current_user
-    return role_checker
+    return permission_checker

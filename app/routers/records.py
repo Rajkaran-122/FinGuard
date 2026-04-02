@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, status, Query, Path, Header
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import get_db, get_current_user, require_role
+from app.core.dependencies import get_db, get_current_user, require_permissions
 from app.core.idempotency import idempotency_cache
 from app.schemas.record import RecordCreate, RecordUpdate, RecordPartialUpdate, RecordResponse, RecordListResponse
 from app.services import record_service
@@ -49,7 +49,7 @@ def get_record(
     """Fetch a single financial record by ID (All roles)."""
     return record_service.get_record(db, record_id)
 
-@router.post("/", response_model=RecordResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_role("admin"))])
+@router.post("/", response_model=RecordResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_permissions("records:write"))])
 def create_record(
     request: RecordCreate,
     db: Session = Depends(get_db),
@@ -77,7 +77,7 @@ def create_record(
 
     return record
 
-@router.put("/{record_id}", response_model=RecordResponse, dependencies=[Depends(require_role("admin"))])
+@router.put("/{record_id}", response_model=RecordResponse, dependencies=[Depends(require_permissions("records:write"))])
 def update_record(
     request: RecordUpdate,
     record_id: str = Path(..., description="The ID of the record"),
@@ -90,7 +90,7 @@ def update_record(
         **request.model_dump()
     )
 
-@router.patch("/{record_id}", response_model=RecordResponse, dependencies=[Depends(require_role("admin"))])
+@router.patch("/{record_id}", response_model=RecordResponse, dependencies=[Depends(require_permissions("records:write"))])
 def patch_record(
     request: RecordPartialUpdate,
     record_id: str = Path(..., description="The ID of the record"),
@@ -103,7 +103,7 @@ def patch_record(
         **request.model_dump(exclude_unset=True)
     )
 
-@router.delete("/{record_id}", dependencies=[Depends(require_role("admin"))])
+@router.delete("/{record_id}", dependencies=[Depends(require_permissions("records:write"))])
 def delete_record(
     record_id: str = Path(..., description="The ID of the record"),
     db: Session = Depends(get_db)

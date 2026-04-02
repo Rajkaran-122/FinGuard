@@ -1,6 +1,6 @@
 """Financial record request/response schemas."""
 
-from datetime import date, datetime
+import datetime
 from typing import Optional, List
 from decimal import Decimal
 from pydantic import BaseModel, Field
@@ -11,7 +11,7 @@ class RecordCreate(BaseModel):
     amount: Decimal = Field(..., gt=0, decimal_places=2, examples=[5000.00])
     type: str = Field(..., pattern="^(income|expense)$", examples=["income"])
     category: str = Field(..., min_length=1, max_length=100, examples=["Salary"])
-    date: date = Field(..., examples=["2025-01-15"])
+    date: datetime.date = Field(..., examples=["2025-01-15"])
     notes: Optional[str] = Field(None, max_length=500, examples=["Monthly salary"])
 
 
@@ -20,7 +20,7 @@ class RecordUpdate(BaseModel):
     amount: Decimal = Field(..., gt=0, decimal_places=2)
     type: str = Field(..., pattern="^(income|expense)$")
     category: str = Field(..., min_length=1, max_length=100)
-    date: date
+    date: datetime.date
     notes: Optional[str] = Field(None, max_length=500)
 
 
@@ -29,7 +29,7 @@ class RecordPartialUpdate(BaseModel):
     amount: Optional[Decimal] = Field(None, gt=0, decimal_places=2)
     type: Optional[str] = Field(None, pattern="^(income|expense)$")
     category: Optional[str] = Field(None, min_length=1, max_length=100)
-    date: Optional[date] = None
+    date: Optional[datetime.date] = None
     notes: Optional[str] = Field(None, max_length=500)
 
 
@@ -39,11 +39,11 @@ class RecordResponse(BaseModel):
     amount: float
     type: str
     category: str
-    date: date
+    date: datetime.date
     notes: Optional[str]
     created_by: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
 
     model_config = {"from_attributes": True}
 

@@ -10,6 +10,8 @@ class SummaryResponse(BaseModel):
     total_expenses: float
     net_balance: float
     record_count: int
+    mom_income_percent: Optional[float] = None
+    mom_expense_percent: Optional[float] = None
 
 
 class CategoryBreakdown(BaseModel):

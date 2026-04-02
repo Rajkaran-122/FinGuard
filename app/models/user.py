@@ -8,7 +8,7 @@ import uuid
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, String, Boolean, DateTime, Enum, Index
+from sqlalchemy import Column, String, Boolean, DateTime, Enum, Index, JSON
 from app.core.database import Base
 
 
@@ -27,6 +27,7 @@ class User(Base):
     email = Column(String(255), nullable=False, unique=True)
     password_hash = Column(String(255), nullable=False)
     role = Column(Enum(UserRole), nullable=False, default=UserRole.VIEWER)
+    permissions = Column(JSON, nullable=False, default=list)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(
         DateTime(timezone=True),

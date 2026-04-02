@@ -4,7 +4,7 @@ Summary Service
 Dashboard aggregation logic — calls repository, returns dicts.
 """
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -19,9 +19,34 @@ def get_summary(db: Session, date_from: Optional[date] = None, date_to: Optional
     if cached:
         return cached
 
-    result = record_repository.get_summary_totals(db, date_from, date_to)
-    cache_service.set(cache_key, result, ttl=3600)  # Cache 1 hour
-    return result
+    current = record_repository.get_summary_totals(db, date_from, date_to)
+    
+    # Calculate Mom (Month-over-Month) or Period-over-Period if bounds provided
+    mom_income_pct = None
+    mom_expense_pct = None
+    
+    if date_from and date_to:
+        delta = date_to - date_from
+        prev_date_to = date_from - timedelta(days=1)
+        prev_date_from = prev_date_to - delta
+        
+        prev = record_repository.get_summary_totals(db, prev_date_from, prev_date_to)
+        
+        if prev["total_income"] > 0:
+            mom_income_pct = round(((current["total_income"] - prev["total_income"]) / prev["total_income"]) * 100, 2)
+        elif current["total_income"] > 0:
+            mom_income_pct = 100.0
+            
+        if prev["total_expenses"] > 0:
+            mom_expense_pct = round(((current["total_expenses"] - prev["total_expenses"]) / prev["total_expenses"]) * 100, 2)
+        elif current["total_expenses"] > 0:
+            mom_expense_pct = 100.0
+
+    current["mom_income_percent"] = mom_income_pct
+    current["mom_expense_percent"] = mom_expense_pct
+
+    cache_service.set(cache_key, current, ttl=3600)  # Cache 1 hour
+    return current
 
 
 def get_categories(db: Session, date_from: Optional[date] = None, date_to: Optional[date] = None):

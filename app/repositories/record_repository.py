@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, case
 
 from app.models.record import FinancialRecord, RecordType
+from app.core.cache import cache_service
 
 
 def _active_records(db: Session):
@@ -36,6 +37,10 @@ def create_record(
     db.add(record)
     db.commit()
     db.refresh(record)
+    
+    # Invalidate dashboard cache aggressively on writes
+    cache_service.invalidate_prefix("dashboard_")
+    
     return record
 
 
@@ -120,6 +125,9 @@ def update_record(db: Session, record: FinancialRecord, **kwargs) -> FinancialRe
     
     db.commit()
     db.refresh(record)
+    
+    cache_service.invalidate_prefix("dashboard_")
+    
     return record
 
 
@@ -133,6 +141,9 @@ def soft_delete_record(db: Session, record: FinancialRecord) -> FinancialRecord:
     
     db.commit()
     db.refresh(record)
+    
+    cache_service.invalidate_prefix("dashboard_")
+    
     return record
 
 

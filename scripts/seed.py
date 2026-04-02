@@ -15,9 +15,15 @@ from app.models.user import User, UserRole
 from app.models.record import FinancialRecord, RecordType
 from app.core.security import hash_password
 
+import alembic.config
+import alembic.command
+
 def seed_database():
-    print("Creating tables if they don't exist...")
-    Base.metadata.create_all(bind=engine)
+    print("Applying database migrations if they don't exist...")
+    # Initialize alembic config
+    alembic_cfg = alembic.config.Config("alembic.ini")
+    alembic.command.upgrade(alembic_cfg, "head")
+    
     db = SessionLocal()
 
     print("Checking if admin exists...")
@@ -28,7 +34,8 @@ def seed_database():
             name="Admin User",
             email="admin@finance.dev",
             password_hash=hash_password("Admin@123"),
-            role=UserRole.ADMIN
+            role=UserRole.ADMIN,
+            permissions=["dashboard:view", "records:read", "records:write", "users:manage"]
         )
         db.add(admin)
         db.commit()
@@ -44,7 +51,8 @@ def seed_database():
             name="Analyst User",
             email="analyst@finance.dev",
             password_hash=hash_password("Analyst@123"),
-            role=UserRole.ANALYST
+            role=UserRole.ANALYST,
+            permissions=["dashboard:view", "records:read"]
         )
         db.add(analyst)
         db.commit()
@@ -57,7 +65,8 @@ def seed_database():
             name="Viewer User",
             email="viewer@finance.dev",
             password_hash=hash_password("Viewer@123"),
-            role=UserRole.VIEWER
+            role=UserRole.VIEWER,
+            permissions=["dashboard:view"]
         )
         db.add(viewer)
         db.commit()

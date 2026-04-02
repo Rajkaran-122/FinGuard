@@ -1,0 +1,18 @@
+Traceback (most recent call last):
+  File "C:\Users\digital metro\Documents\Financial_Dashboard\debug.py", line 3, in <module>
+    import app.schemas.record
+  File "C:\Users\digital metro\Documents\Financial_Dashboard\app\schemas\record.py", line 9, in <module>
+    class RecordCreate(BaseModel):
+  File "C:\Users\digital metro\Documents\Financial_Dashboard\venv\Lib\site-packages\pydantic\_internal\_model_construction.py", line 242, in __new__
+    set_model_fields(cls, config_wrapper=config_wrapper, ns_resolver=ns_resolver)
+  File "C:\Users\digital metro\Documents\Financial_Dashboard\venv\Lib\site-packages\pydantic\_internal\_model_construction.py", line 566, in set_model_fields
+    fields, class_vars = collect_model_fields(cls, config_wrapper, ns_resolver, typevars_map=typevars_map)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\digital metro\Documents\Financial_Dashboard\venv\Lib\site-packages\pydantic\_internal\_fields.py", line 363, in collect_model_fields
+    field_info = FieldInfo_.from_annotated_attribute(ann_type, assigned_value, _source=AnnotationSource.CLASS)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\digital metro\Documents\Financial_Dashboard\venv\Lib\site-packages\pydantic\fields.py", line 407, in from_annotated_attribute
+    raise PydanticUserError(
+pydantic.errors.PydanticUserError: Error when building FieldInfo from annotated attribute. Make sure you don't have any field name clashing with a type annotation.
+
+For further information visit https://errors.pydantic.dev/2.12/u/unevaluable-type-annotation

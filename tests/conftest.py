@@ -61,7 +61,8 @@ def admin_user(db_session):
         name="Admin Test",
         email="admin_test@finance.dev",
         password_hash=hash_password("Admin@123"),
-        role=UserRole.ADMIN
+        role=UserRole.ADMIN,
+        permissions=["dashboard:view", "records:read", "records:write", "users:manage"]
     )
     db_session.add(user)
     db_session.commit()

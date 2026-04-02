@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import get_db, get_current_user, require_role
+from app.core.dependencies import get_db, get_current_user, require_permissions
 from app.schemas.summary import SummaryResponse, CategoryResponse, TrendResponse, RecentActivityResponse
 from app.services import summary_service
 from app.models.user import User
@@ -23,7 +23,7 @@ def get_summary(
     """Returns total income, expenses, and net balance (All roles)."""
     return summary_service.get_summary(db, date_from, date_to)
 
-@router.get("/categories", response_model=CategoryResponse, dependencies=[Depends(require_role("admin", "analyst"))])
+@router.get("/categories", response_model=CategoryResponse, dependencies=[Depends(require_permissions("dashboard:view"))])
 def get_categories(
     date_from: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
     date_to: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
@@ -41,7 +41,7 @@ def get_recent(
     """Recent transactions (All roles)."""
     return summary_service.get_recent(db, limit)
 
-@router.get("/trends", response_model=TrendResponse, dependencies=[Depends(require_role("admin", "analyst"))])
+@router.get("/trends", response_model=TrendResponse, dependencies=[Depends(require_permissions("dashboard:view"))])
 def get_trends(
     date_from: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
     date_to: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),

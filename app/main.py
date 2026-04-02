@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.database import engine, Base
+from app.core.logging import StructuredLoggingMiddleware
 from app.routers import auth, users, records, summary
 
 @asynccontextmanager
@@ -38,6 +39,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Structured JSON Logging
+app.add_middleware(StructuredLoggingMiddleware)
 
 # Include Routers
 app.include_router(auth.router)

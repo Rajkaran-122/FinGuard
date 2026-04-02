@@ -1,8 +1,8 @@
-# FinGuard — Elite Finance Data Processing Backend
+# FinGuard — Finance Data Processing Backend
 
 FinGuard is a production-grade RESTful API backend engineered to power a multi-role finance dashboard. The system manages organizational financial records, enforces strict Role-Based Access Control (RBAC), and computes powerful database-driven dashboard aggregations.
 
-## 🚀 Key Differentiators & Elite Standards
+##  Key Differentiators 
 
 Unlike boilerplate CRUD applications, FinGuard is built with severe architectural and security boundaries in mind:
 
@@ -14,7 +14,7 @@ Unlike boilerplate CRUD applications, FinGuard is built with severe architectura
 
 ---
 
-## 🏗️ System Architecture
+## System Architecture
 
 FinGuard leverages a strictly typed **Python 3.12 + FastAPI + SQLAlchemy** stack. 
 
@@ -66,7 +66,7 @@ View the generated **OpenAPI Swagger UI interface** dynamically hooked off model
 
 ---
 
-## 🔌 API Documentation & Usage Samples
+##  API Documentation & Usage Samples
 
 Below are foundational examples demonstrating critical RESTful flows.
 
@@ -122,7 +122,7 @@ curl -X 'GET' \
 
 ---
 
-## 🧪 Validations & Dynamic Testing
+##  Validations & Dynamic Testing
 
 A fully decoupled Pytest integration suite overrides dependency engines securely injecting in-memory unpersisted SQLite scopes per testing function. This ensures test reliability bypassing explicit environment tearing.
 

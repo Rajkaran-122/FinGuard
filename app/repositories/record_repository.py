@@ -44,6 +44,17 @@ def get_record_by_id(db: Session, record_id: str) -> Optional[FinancialRecord]:
     return _active_records(db).filter(FinancialRecord.id == record_id).first()
 
 
+import json
+
+def _log_audit(db: Session, record_id: str, action: str, old_dict: dict, new_dict: dict):
+    from app.models.record import FinancialRecordAudit
+    db.add(FinancialRecordAudit(
+        record_id=record_id,
+        action_type=action,
+        old_state=json.dumps(old_dict, default=str),
+        new_state=json.dumps(new_dict, default=str)
+    ))
+
 def get_records(
     db: Session,
     record_type: Optional[str] = None,
@@ -51,13 +62,11 @@ def get_records(
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
     search: Optional[str] = None,
+    cursor: Optional[str] = None,
     page: int = 1,
     limit: int = 50,
-) -> Tuple[List[FinancialRecord], int]:
-    """
-    Fetch records with optional filters and pagination.
-    Returns (records, total_count).
-    """
+) -> Tuple[List[FinancialRecord], int, Optional[str]]:
+    """Return records, total count, and next cursor."""
     query = _active_records(db)
 
     if record_type:
@@ -74,33 +83,54 @@ def get_records(
             (FinancialRecord.notes.ilike(search_pattern)) |
             (FinancialRecord.category.ilike(search_pattern))
         )
+    
+    if cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor.replace("Z", "+00:00"))
+            query = query.filter(FinancialRecord.created_at < cursor_dt)
+        except ValueError:
+            pass
 
     total = query.count()
     records = (
-        query.order_by(FinancialRecord.date.desc(), FinancialRecord.created_at.desc())
-        .offset((page - 1) * limit)
+        query.order_by(FinancialRecord.created_at.desc())
         .limit(limit)
         .all()
+    ) if cursor else (
+        query.order_by(FinancialRecord.date.desc(), FinancialRecord.created_at.desc())
+        .offset((page - 1) * limit).limit(limit).all()
     )
-    return records, total
+    
+    next_cursor = records[-1].created_at.isoformat() if len(records) == limit else None
+    return records, total, next_cursor
 
 
 def update_record(db: Session, record: FinancialRecord, **kwargs) -> FinancialRecord:
-    """Update record fields from keyword arguments."""
+    """Update record with Immutable Audit Logs."""
+    old_state = {c.name: getattr(record, c.name) for c in record.__table__.columns}
     for key, value in kwargs.items():
         if value is not None:
             if key == "type":
                 setattr(record, key, RecordType(value))
             else:
                 setattr(record, key, value)
+                
+    new_state = {c.name: getattr(record, c.name) for c in record.__table__.columns}
+    _log_audit(db, record.id, "UPDATE", old_state, new_state)
+    
     db.commit()
     db.refresh(record)
     return record
 
 
 def soft_delete_record(db: Session, record: FinancialRecord) -> FinancialRecord:
-    """Soft-delete a record by setting deleted_at timestamp."""
+    """Soft-delete triggers an Immutable Audit trail."""
+    old_state = {c.name: getattr(record, c.name) for c in record.__table__.columns}
     record.deleted_at = datetime.now(timezone.utc)
+    new_state = {c.name: getattr(record, c.name) for c in record.__table__.columns}
+    
+    _log_audit(db, record.id, "SOFT_DELETE", old_state, new_state)
+    
     db.commit()
     db.refresh(record)
     return record

@@ -3,10 +3,11 @@ Financial Record routes.
 """
 from datetime import date
 from typing import Optional
-from fastapi import APIRouter, Depends, status, Query, Path
+from fastapi import APIRouter, Depends, status, Query, Path, Header
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_db, get_current_user, require_role
+from app.core.idempotency import idempotency_cache
 from app.schemas.record import RecordCreate, RecordUpdate, RecordPartialUpdate, RecordResponse, RecordListResponse
 from app.services import record_service
 from app.models.user import User
@@ -20,6 +21,7 @@ def list_records(
     date_from: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
     date_to: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
     search: Optional[str] = Query(None, description="Search term for notes or category"),
+    cursor: Optional[str] = Query(None, description="ISO timestamp cursor for massive datasets"),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -33,6 +35,7 @@ def list_records(
         date_from=date_from,
         date_to=date_to,
         search=search,
+        cursor=cursor,
         page=page,
         limit=limit
     )
@@ -50,10 +53,16 @@ def get_record(
 def create_record(
     request: RecordCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key", description="Unique UUID to prevent duplicate transaction entries.")
 ):
     """Create a new financial record (Admin only)."""
-    return record_service.create_record(
+    if idempotency_key:
+        cached_response = idempotency_cache.get_response(idempotency_key)
+        if cached_response:
+            return cached_response
+
+    record = record_service.create_record(
         db=db,
         amount=request.amount,
         record_type=request.type,
@@ -62,6 +71,11 @@ def create_record(
         created_by=current_user.id,
         notes=request.notes
     )
+
+    if idempotency_key:
+        idempotency_cache.save_response(idempotency_key, record)
+
+    return record
 
 @router.put("/{record_id}", response_model=RecordResponse, dependencies=[Depends(require_role("admin"))])
 def update_record(

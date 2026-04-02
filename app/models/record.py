@@ -58,3 +58,19 @@ class FinancialRecord(Base):
 
     def __repr__(self):
         return f"<FinancialRecord {self.type.value} {self.amount} {self.category}>"
+
+class FinancialRecordAudit(Base):
+    """Immutable audit log capturing exact changes preventing historical data loss."""
+    __tablename__ = "financial_record_audits"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    record_id = Column(String(36), ForeignKey("financial_records.id", ondelete="CASCADE"), nullable=False)
+    action_type = Column(String(50), nullable=False) 
+    old_state = Column(Text, nullable=True)
+    new_state = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        Index("idx_audit_record_id", "record_id"),
+    )
+

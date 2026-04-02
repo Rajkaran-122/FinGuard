@@ -54,3 +54,4 @@ class RecordListResponse(BaseModel):
     total: int
     page: int = 1
     limit: int = 50
+    next_cursor: Optional[str] = None

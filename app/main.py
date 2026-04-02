@@ -10,6 +10,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi import HTTPException
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -66,10 +68,23 @@ def health_check():
         "environment": settings.ENVIRONMENT,
     }
 
-# Explicit exception handler for unhandled 500s to ensure uniform JSON responses
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={"error": "VALIDATION_FAILED", "detail": exc.errors()},
+    )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": "CLIENT_ERROR", "detail": exc.detail},
+    )
+
 @app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
+async def global_exception_handler(request, exc: Exception):
     return JSONResponse(
         status_code=500,
-        content={"detail": "Internal server error. Check server logs for more details."},
+        content={"error": "SERVER_ERROR", "detail": "Internal server error. Please contact support."},
     )

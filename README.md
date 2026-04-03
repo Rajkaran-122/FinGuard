@@ -21,13 +21,110 @@ Unlike traditional CRUD prototypes, FinGuard implements advanced architectural p
 
 **Stack:** Python 3.12 | FastAPI | SQLAlchemy | PostgreSQL | Docker | Pytest
 
+### Layered Architecture
+
 ```mermaid
-graph TD
-    Client[Dashboard UI / Postman] -->|HTTP Validation| API[FastAPI Routers]
-    API -->|Depends| Auth[Granular Permissions Gate]
-    API -->|Event Driven| Services[Business Logic Layer & Cache Aside]
-    Services -->|Method Triggers| Repositories[Database Access Layer]
-    Repositories -->|Alembic Managed SQLAlchemy| DB[(PostgreSQL Docker Node)]
+graph TB
+    subgraph Client Layer
+        C1[Web Dashboard]
+        C2[Postman / cURL]
+    end
+
+    subgraph API Gateway
+        MW[Rate Limiter + CORS + Structured Logger]
+        R1[Auth Router]
+        R2[Records Router]
+        R3[Dashboard Router]
+        R4[Users Router]
+    end
+
+    subgraph Security Layer
+        JWT[JWT Token Decoder]
+        RBAC[Permission Array Gate]
+        OWN[Ownership Scope Filter]
+    end
+
+    subgraph Service Layer
+        AS[Auth Service]
+        RS[Record Service]
+        SS[Summary Service]
+        US[User Service]
+    end
+
+    subgraph Data Layer
+        REPO[Record Repository]
+        CACHE[Cache-Aside Store]
+        AUDIT[Immutable Audit Log]
+    end
+
+    subgraph Persistence
+        DB[(PostgreSQL 15)]
+        MIG[Alembic Migrations]
+    end
+
+    C1 & C2 -->|HTTPS| MW
+    MW --> R1 & R2 & R3 & R4
+    R1 --> JWT --> AS
+    R2 & R3 & R4 --> JWT --> RBAC --> OWN
+    OWN --> RS & SS & US
+    RS & SS --> CACHE
+    RS & SS & US --> REPO
+    RS --> AUDIT
+    REPO --> DB
+    MIG -.->|Schema Version Control| DB
+
+    style CACHE fill:#2d6a4f,stroke:#1b4332,color:#d8f3dc
+    style DB fill:#1d3557,stroke:#457b9d,color:#a8dadc
+    style RBAC fill:#e63946,stroke:#d62828,color:#f1faee
+    style OWN fill:#e76f51,stroke:#f4a261,color:#fff
+```
+
+### Request Data Flow
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Router
+    participant JWT Auth
+    participant RBAC
+    participant Service
+    participant Cache
+    participant Repository
+    participant PostgreSQL
+
+    Client->>Router: HTTP Request + Bearer Token
+    Router->>JWT Auth: Extract & decode token
+    JWT Auth->>PostgreSQL: Re-fetch user (block deactivated)
+    JWT Auth-->>Router: User object
+
+    Router->>RBAC: Check permissions array
+    alt Missing permissions
+        RBAC-->>Client: 403 Forbidden
+    end
+
+    Router->>Service: Execute business logic
+
+    Note over Service: Ownership scope resolved<br/>Admin → all data<br/>Others → own data only
+
+    alt Read Operation (GET)
+        Service->>Cache: Check cache (key = scope + params)
+        alt Cache HIT
+            Cache-->>Service: Cached result
+        else Cache MISS
+            Service->>Repository: Query with ownership filter
+            Repository->>PostgreSQL: SQL (indexed aggregation)
+            PostgreSQL-->>Repository: Result set
+            Repository-->>Service: Data
+            Service->>Cache: Store (TTL = 1 hour)
+        end
+    else Write Operation (POST/PUT/DELETE)
+        Service->>Repository: Mutate record
+        Repository->>PostgreSQL: INSERT/UPDATE + audit log
+        PostgreSQL-->>Repository: Committed
+        Service->>Cache: Invalidate dashboard_* keys
+    end
+
+    Service-->>Client: JSON Response
 ```
 
 ### Assumptions & Trade-offs (Assignment Specific)

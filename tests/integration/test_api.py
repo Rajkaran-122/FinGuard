@@ -24,7 +24,10 @@ def test_admin_get_users(client, admin_headers):
     """Test admin can list users."""
     response = client.get("/api/users/", headers=admin_headers)
     assert response.status_code == 200
-    data = response.json()
+    # Unwrap from ResponseWrapper
+    payload = response.json()
+    assert payload["status"] == "success"
+    data = payload["data"]
     assert "users" in data
     assert "total" in data
     assert data["total"] >= 1  # The admin user from fixture
@@ -42,14 +45,22 @@ def test_admin_create_and_summary_record(client, admin_headers):
     }
     response = client.post("/api/records/", json=record_payload, headers=admin_headers)
     assert response.status_code == 201
-    record_data = response.json()
+    
+    # Unwrap creation response
+    creation_payload = response.json()
+    assert creation_payload["status"] == "success"
+    record_data = creation_payload["data"]
     assert record_data["amount"] == 1500.50
     assert record_data["type"] == "income"
 
     # Fetch summary
     response_summary = client.get("/api/dashboard/summary", headers=admin_headers)
     assert response_summary.status_code == 200
-    summary_data = response_summary.json()
+    
+    # Unwrap summary response
+    summary_payload = response_summary.json()
+    assert summary_payload["status"] == "success"
+    summary_data = summary_payload["data"]
 
     assert summary_data["total_income"] == 1500.50
     assert summary_data["record_count"] == 1
@@ -81,7 +92,7 @@ def test_viewer_cannot_see_admin_records(client, admin_headers, viewer_headers):
     }
     create_response = client.post("/api/records/", json=record_payload, headers=admin_headers)
     assert create_response.status_code == 201
-    admin_record_id = create_response.json()["id"]
+    admin_record_id = create_response.json()["data"]["id"]
 
     # Viewer tries to access admin's record by UUID — should get 404 (not 403)
     # Returning 404 instead of 403 prevents information leakage about record existence
@@ -102,7 +113,7 @@ def test_viewer_sees_only_own_records_in_list(client, admin_headers, viewer_head
     # Viewer lists their records — should see 0 (they haven't created any)
     viewer_list = client.get("/api/records/", headers=viewer_headers)
     assert viewer_list.status_code == 200
-    assert viewer_list.json()["total"] == 0
+    assert viewer_list.json()["data"]["total"] == 0
 
 
 def test_viewer_summary_is_scoped(client, admin_headers, viewer_headers):
@@ -118,5 +129,7 @@ def test_viewer_summary_is_scoped(client, admin_headers, viewer_headers):
     # Viewer's summary should show 0 income (they have no records)
     viewer_summary = client.get("/api/dashboard/summary", headers=viewer_headers)
     assert viewer_summary.status_code == 200
-    assert viewer_summary.json()["total_income"] == 0.0
-    assert viewer_summary.json()["record_count"] == 0
+    
+    summary_data = viewer_summary.json()["data"]
+    assert summary_data["total_income"] == 0.0
+    assert summary_data["record_count"] == 0

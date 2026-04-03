@@ -1,113 +1,107 @@
-# FinGuard — Senior Engineering Interview Preparation Guide
+# FinGuard — System Design and Architectural Guide
 
-This document captures the **system design thinking** behind FinGuard. Use it to confidently explain architectural decisions, trade-offs, and production scaling strategies during technical interviews.
+This document captures the system design thinking behind the FinGuard API. It outlines architectural decisions, trade-offs, and production scaling strategies suitable for technical evaluation.
 
 ---
 
 ## 1. System Behavior Under Load (100K Users / 1M Records)
 
-### What Breaks First
-| Component | Bottleneck | Mitigation (Already Implemented) |
+### Bottleneck Analysis
+| Component | Bottleneck | Mitigation Strategy (Implemented) |
 |-----------|-----------|----------------------------------|
 | `COUNT(*)` on records list | Full table scan at 1M+ rows | Cursor-based pagination avoids OFFSET; COUNT is bounded by ownership filter |
-| Dashboard aggregations | CPU-heavy `SUM/GROUP BY` on every request | Cache-aside pattern with 1-hour TTL eliminates repeated DB hits |
-| JWT validation | DB round-trip on every request to re-fetch user | Acceptable at this scale; at 100K RPS would add Redis session cache |
-| Cache memory | Unbounded growth of cache keys | TTL-based expiration + prefix invalidation keeps memory bounded |
+| Dashboard aggregations | CPU-heavy `SUM/GROUP BY` on every request | Cache-aside pattern with 1-hour TTL limits repeated database queries |
+| JWT validation | DB round-trip on every request to re-fetch user | Acceptable at current scale; at 100K RPS would add Redis session cache |
+| Cache memory | Unbounded growth of cache keys | TTL-based expiration and prefix invalidation maintain bounded memory constraints |
 
-### What I Would Change at Scale
-- **Database**: Add read replicas; route aggregation queries to replicas
-- **Cache**: Swap in-memory `dict` for Redis cluster (zero code changes — same `.get/.set/.invalidate_prefix` API)
-- **Async Processing**: Move cache invalidation to a background task queue (Celery/ARQ) so writes don't block on cache purging
+### Scaling Strategies
+- **Database**: Add read replicas; route aggregation queries to read-only replicas.
+- **Cache**: Transition in-memory dictionary to a Redis cluster. The API exposes standard `.get`/`.set`/`.invalidate_prefix` methods requiring zero changes to the service layer.
+- **Async Processing**: Offload cache invalidation to a background task queue (e.g., Celery or ARQ) to prevent write operations from blocking on cache purging.
 
 ---
 
 ## 2. Failure Handling Strategy
 
 ### Cache Inconsistency
-**Scenario**: Admin creates a record, cache invalidation fails mid-operation.
-**Current Design**: Cache invalidation runs synchronously *after* `db.commit()`. If the process crashes between commit and invalidation, client sees stale data until TTL expires (1 hour max).
-**Production Fix**: Use database-level `LISTEN/NOTIFY` (PostgreSQL) to trigger cache invalidation, guaranteeing delivery even across process restarts.
+**Scenario**: An administrator creates a record, but cache invalidation fails mid-operation.
+**Current Design**: Cache invalidation runs synchronously after `db.commit()`. If the process crashes between commit and invalidation, the client interfaces with stale data until the TTL expires (1 hour maximum).
+**Production Solution**: Utilize database-level notifications (e.g., PostgreSQL `LISTEN/NOTIFY`) to trigger cache invalidation asynchronously, guaranteeing delivery across process restarts.
 
 ### Duplicate Write Protection
-**Scenario**: Network timeout causes client to retry a `POST /api/records/` request.
-**Current Design**: `Idempotency-Key` header stores the first response. Retries with the same key return the cached response without creating duplicates.
-**Why This Matters in Finance**: A duplicate $50,000 income record would corrupt all dashboard analytics and audit trails.
+**Scenario**: A network timeout induces a client to retry a `POST /api/records/` request.
+**Current Design**: The `Idempotency-Key` header stores the initial response. Retries with the identical key return the cached response without creating duplicate database entries.
+**Significance**: Duplicate financial records corrupt dashboard analytics and audit trails.
 
 ### Database Connection Exhaustion
 **Scenario**: 1000 concurrent requests exhaust the connection pool.
-**Current Design**: SQLAlchemy session factory with `yield` ensures connections are always returned to the pool, even on exceptions.
-**Production Fix**: Configure `pool_size`, `max_overflow`, and `pool_timeout` in SQLAlchemy engine. Add connection health checks.
+**Current Design**: The SQLAlchemy session factory with the `yield` keyword ensures connections consistently return logic to the pool, even during exception handling.
+**Production Solution**: Explicitly configure `pool_size`, `max_overflow`, and `pool_timeout` in the SQLAlchemy engine, and integrate connection health checks.
 
-### Race Conditions on Update
-**Scenario**: Two admins update the same record simultaneously.
-**Current Design**: SQLAlchemy's unit-of-work pattern handles basic conflicts. The immutable audit log captures both versions.
-**Production Fix**: Add optimistic locking with a `version` column: `UPDATE ... WHERE id = ? AND version = ?`.
-
----
-
-## 3. Trade-offs Explained
-
-### Why PostgreSQL (Not SQLite/MongoDB)
-| Factor | PostgreSQL | SQLite | MongoDB |
-|--------|-----------|--------|---------|
-| ACID Transactions | ✅ Full | ✅ WAL mode | ❌ Eventually consistent |
-| Concurrent Writes | ✅ Row-level locks | ❌ File-level locks | ✅ Document-level |
-| Aggregation Performance | ✅ Query planner + indexes | ⚠️ Limited optimizer | ❌ No JOINs |
-| Schema Evolution | ✅ Alembic migrations | ❌ Manual | ⚠️ Schemaless = risky |
-| **Why I chose it**: Financial data demands ACID guarantees. A corrupted transaction record is unacceptable. PostgreSQL's query planner also optimizes our `SUM/GROUP BY` aggregations automatically using the composite indexes I defined. |
-
-### Why Sync Cache Invalidation (Not Async Queue)
-- **Assignment Scope**: Adding RabbitMQ/Redis Streams would demonstrate infrastructure setup, not backend thinking
-- **The Cache-Aside Pattern**: The internal `dict` with `.get/.set/.invalidate_prefix` methods has the *identical API surface* as a Redis client. Swapping to Redis requires changing one file (`cache.py`), zero service layer changes
-- **Bounded Risk**: TTL ensures stale data self-corrects within 1 hour maximum, even if edge-case invalidation failures occur
-
-### Why Permission Arrays (Not Role Enums)
-- **Old Design**: `if user.role == "admin"` — adding a new role requires modifying every check point
-- **Current Design**: `if "records:write" in user.permissions` — adding an "Auditor" role means seeding `["records:read", "dashboard:view"]` with zero code changes
-- **Real-World Analog**: This mirrors AWS IAM policy design where permissions are attached to principals, not hardcoded into application logic
+### Concurrent Update Conflicts
+**Scenario**: Two administrators attempt to update the same record simultaneously.
+**Current Design**: SQLAlchemy's unit-of-work pattern resolves basic write conflicts. The immutable audit log captures both transaction versions sequentially.
+**Production Solution**: Implement optimistic locking via an incremental `version` column: `UPDATE ... WHERE id = ? AND version = ?`.
 
 ---
 
-## 4. Security Design
+## 3. Trade-offs and Architecture Rationale
 
-### IDOR Prevention (Insecure Direct Object Reference)
-**The Attack**: User A guesses User B's record UUID and accesses it via `GET /api/records/{uuid}`.
-**The Fix**: Every query passes through `_active_records(db, user_id=scope)`. Non-admin users can only see records where `created_by == their_id`. The system returns `404` (not `403`) to prevent information leakage about record existence.
+### Database Selection: PostgreSQL vs SQLite/MongoDB
+| Specification | PostgreSQL | SQLite | MongoDB |
+|---------------|-----------|--------|---------|
+| ACID Transactions | Full guarantee | WAL mode limits concurrency | Eventual consistency limits financial safety |
+| Concurrent Writes | Row-level locks | File-level locks | Document-level locks |
+| Aggregation Performance | Robust query planner + indexes | Limited optimizer engine | Lacks complex JOIN operations |
+| Schema Evolution | Alembic migrations | Manual table alterations | Schemaless design risks data corruption |
+| **Rationale**: Financial data necessitates strict ACID guarantees. PostgreSQL's query planner automatically optimizes the `SUM/GROUP BY` aggregations using defined composite indexes. |
 
-### Password Safety
-- `password_hash` column is never included in `UserResponse` Pydantic schema
-- Pydantic V2's `from_attributes` mode only serializes explicitly declared fields
-- Even a code mistake in the router cannot leak the hash — the schema acts as a firewall
+### Caching Strategy: Synchronous vs Asynchronous Queue
+- **Scope Alignment**: Implementing RabbitMQ or Redis Streams would introduce infrastructural complexity disproportionate to the backend assignment parameters limit.
+- **The Cache-Aside Pattern**: The internal dictionary object adheres to the exact method signature of a Redis client. Migrating to Redis requires modifying a single module (`cache.py`) without disrupting the service layer.
+- **Bounded Risk**: Time-to-Live (TTL) parameters guarantee that stale data self-corrects within an hour even under worst-case invalidation failure events.
 
-### Input Validation Layers
-| Layer | What It Catches | Example |
-|-------|----------------|---------|
-| Pydantic Schema | Type mismatches, range violations | `amount: Decimal = Field(..., gt=0)` |
-| SQLAlchemy Enum | Invalid record types | `RecordType("invalid")` raises ValueError |
-| Database Constraints | NULL violations, FK integrity | `nullable=False`, `ondelete="CASCADE"` |
+### Authorization: Permission Arrays vs Role Enums
+- **Legacy Design**: Explicit procedural checks (`if user.role == "admin"`) require extensive refactoring to support new roles.
+- **Current Design**: Granular capabilities checks (`if "records:write" in user.permissions`). Adding a new functional role (e.g., "Auditor") only requires seeding a specific array (`["records:read", "dashboard:view"]`) with no codebase alterations.
+- **Authentication Model**: This reflects AWS IAM policy architectures where functional permissions attach directly to active principals.
 
 ---
 
-## 5. Key Interview Answers
+## 4. Security Framework
 
-### "Walk me through a request lifecycle"
-1. Client sends `POST /api/records/` with JWT in Authorization header
-2. FastAPI extracts token → `get_current_user` dependency decodes JWT, re-fetches user from DB, checks `is_active`
-3. `require_permissions("records:write")` dependency verifies user has the permission in their JSON array
-4. Pydantic V2 validates the request body against `RecordCreate` schema (amount > 0, type matches regex, etc.)
-5. Router calls `record_service.create_record()` — service layer handles business logic
-6. Service calls `record_repository.create_record()` — repository handles DB interaction
-7. Repository commits to PostgreSQL, then invalidates all `dashboard_*` cache keys
-8. Response is serialized through `RecordResponse` schema (which excludes internal fields like `deleted_at`)
+### Horizontal Privilege Escalation Protection (IDOR)
+**Vulnerability**: A user attempts to manipulate a URL parameter to access another user's record (`GET /api/records/{uuid}`).
+**Resolution**: All database queries resolve sequentially through the ownership scope filter `_active_records(db, user_id=scope)`. Standard users only access data where `created_by == their_id`. Unauthorized operations return HTTP 404 (Not Found) rather than 403 (Forbidden) to prevent an attacker from inferring record existence boundaries.
 
-### "How do you handle a production outage?"
-1. Health check endpoint (`/health`) returns DB connection status — load balancer routes traffic away from unhealthy instances
-2. Structured JSON logging middleware attaches a `request_id` (UUID4) to every log line — enables distributed tracing
-3. Global exception handler catches unhandled errors and returns safe `500` response without leaking stack traces
-4. Immutable audit log preserves all record state changes — enables forensic investigation after incidents
+### Cryptographic and Identity Safety
+- The `password_hash` column is explicitly omitted from the `UserResponse` serialization payload.
+- Pydantic V2 strictly enforces `from_attributes` mode, serializing only explicitly declared properties mapping from the ORM.
+- The schema isolates the internal SQLAlchemy models, acting as a structural firewall against accidental data exposure.
 
-### "What would you do differently with more time?"
-1. **Optimistic Locking**: Add `version` column to prevent concurrent update conflicts
-2. **Background Workers**: Move cache invalidation and audit logging to async task queue
-3. **Rate Limiting per User**: Current rate limiting is global; production needs per-user token bucket
-4. **API Versioning**: Prefix routes with `/v1/` to support backward-compatible schema evolution
+### Input Validation Constraints
+| Layer | Verification Scope | Implementation Example |
+|-------|-------------------|----------------------|
+| Pydantic Schema | Type mismatches, explicit range limitations | `amount: Decimal = Field(..., gt=0)` |
+| SQLAlchemy Enum | Domain-specific structural types | `RecordType("invalid")` raises intrinsic ValueError |
+| Database Constraints | Reference validation, NULL states | `nullable=False`, `ondelete="CASCADE"` |
+
+---
+
+## 5. Architectural Flow Examples
+
+### Request Lifecycle Trace
+1. The client issues `POST /api/records/` including a Bearer JWT.
+2. The middleware extracts the component → `get_current_user` decodes the JWT, queries the database, and validates the `is_active` boolean state.
+3. The `require_permissions("records:write")` dependency cross-references the requested action against the user's JSON capabilities array.
+4. Pydantic V2 parses the incoming request body according to the `RecordCreate` definitions (enforcing positive integers and regex matching).
+5. The API Router delegates the validated parameters into `record_service.create_record()`.
+6. The Service layer resolves ownership constraints and triggers `record_repository.create_record()`.
+7. The Repository layer persists the transaction into PostgreSQL and issues an invalidation command against all `dashboard_*` cache stores.
+8. The Service layer structures the standardized `ResponseWrapper`, omitting confidential internal model properties via the Pydantic boundary model.
+
+### Outage Handling and Post-Mortem Strategy
+1. A continuous `/health` endpoint exposes real-time database connection statuses to enable load-balancer traffic diversion from degraded instances.
+2. A structured JSON logger injects a unique trace component (`request_id`) across all functional lines to trace complex distributed errors.
+3. The global application architecture handles unhandled exceptions (Code 500) natively, outputting sanitized JSON schema structures without leaking interpreter stack traces.
+4. The immutable audit log preserves exact representations of historical values, enabling structural reconstruction of data following accidental administrator corruption events.

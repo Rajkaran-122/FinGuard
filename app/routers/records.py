@@ -15,12 +15,13 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import get_db, get_current_user, require_permissions
 from app.core.idempotency import idempotency_cache
 from app.schemas.record import RecordCreate, RecordUpdate, RecordPartialUpdate, RecordResponse, RecordListResponse
+from app.schemas.common import ResponseWrapper
 from app.services import record_service
 from app.models.user import User
 
 router = APIRouter(prefix="/api/records", tags=["Financial Records"])
 
-@router.get("/", response_model=RecordListResponse)
+@router.get("/", response_model=ResponseWrapper[RecordListResponse])
 def list_records(
     record_type: Optional[str] = Query(None, description="Filter by type (income/expense)"),
     category: Optional[str] = Query(None, description="Filter by category"),
@@ -34,7 +35,7 @@ def list_records(
     current_user: User = Depends(get_current_user)
 ):
     """List financial records with optional filters (ownership-scoped)."""
-    return record_service.list_records(
+    data = record_service.list_records(
         db=db,
         current_user=current_user,
         record_type=record_type,
@@ -46,17 +47,19 @@ def list_records(
         page=page,
         limit=limit
     )
+    return {"status": "success", "message": "Records retrieved successfully", "data": data}
 
-@router.get("/{record_id}", response_model=RecordResponse)
+@router.get("/{record_id}", response_model=ResponseWrapper[RecordResponse])
 def get_record(
     record_id: str = Path(..., description="The ID of the record"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Fetch a single financial record by ID (ownership-scoped)."""
-    return record_service.get_record(db, record_id, current_user)
+    data = record_service.get_record(db, record_id, current_user)
+    return {"status": "success", "message": "Record retrieved successfully", "data": data}
 
-@router.post("/", response_model=RecordResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_permissions("records:write"))])
+@router.post("/", response_model=ResponseWrapper[RecordResponse], status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_permissions("records:write"))])
 def create_record(
     request: RecordCreate,
     db: Session = Depends(get_db),
@@ -67,7 +70,7 @@ def create_record(
     if idempotency_key:
         cached_response = idempotency_cache.get_response(idempotency_key)
         if cached_response:
-            return cached_response
+            return {"status": "success", "message": "Record retrieved from cache", "data": cached_response}
 
     record = record_service.create_record(
         db=db,
@@ -82,9 +85,9 @@ def create_record(
     if idempotency_key:
         idempotency_cache.save_response(idempotency_key, record)
 
-    return record
+    return {"status": "success", "message": "Record created successfully", "data": record}
 
-@router.put("/{record_id}", response_model=RecordResponse, dependencies=[Depends(require_permissions("records:write"))])
+@router.put("/{record_id}", response_model=ResponseWrapper[RecordResponse], dependencies=[Depends(require_permissions("records:write"))])
 def update_record(
     request: RecordUpdate,
     record_id: str = Path(..., description="The ID of the record"),
@@ -92,14 +95,15 @@ def update_record(
     current_user: User = Depends(get_current_user),
 ):
     """Full update of an existing record (Admin only, ownership-scoped)."""
-    return record_service.update_record(
+    data = record_service.update_record(
         db=db,
         record_id=record_id,
         current_user=current_user,
         **request.model_dump()
     )
+    return {"status": "success", "message": "Record updated successfully", "data": data}
 
-@router.patch("/{record_id}", response_model=RecordResponse, dependencies=[Depends(require_permissions("records:write"))])
+@router.patch("/{record_id}", response_model=ResponseWrapper[RecordResponse], dependencies=[Depends(require_permissions("records:write"))])
 def patch_record(
     request: RecordPartialUpdate,
     record_id: str = Path(..., description="The ID of the record"),
@@ -107,12 +111,13 @@ def patch_record(
     current_user: User = Depends(get_current_user),
 ):
     """Partial update of an existing record (Admin only, ownership-scoped)."""
-    return record_service.update_record(
+    data = record_service.update_record(
         db=db,
         record_id=record_id,
         current_user=current_user,
         **request.model_dump(exclude_unset=True)
     )
+    return {"status": "success", "message": "Record patched successfully", "data": data}
 
 @router.delete("/{record_id}", dependencies=[Depends(require_permissions("records:write"))])
 def delete_record(
@@ -121,4 +126,5 @@ def delete_record(
     current_user: User = Depends(get_current_user),
 ):
     """Soft-delete a financial record (Admin only, ownership-scoped)."""
-    return record_service.delete_record(db, record_id, current_user)
+    data = record_service.delete_record(db, record_id, current_user)
+    return {"status": "success", "message": "Record deleted successfully", "data": data}

@@ -34,13 +34,14 @@ def create_record(...): ...
 ```
 This isolates security logic, simplifies unit testing, and is inherently supported by OpenAPI. Inactive and suspended users are instantly rejected globally through token intercept verification.
 
-**Permissions Matrix:**
-| Operation | Viewer | Analyst | Admin |
-|-----------|--------|---------|-------|
-| View records & basic summaries | ✔ Allowed | ✔ Allowed | ✔ Allowed |
-| Advanced analytical trends & categories | ✘ Denied | ✔ Allowed | ✔ Allowed |
-| Create, Update, Delete records | ✘ Denied | ✘ Denied | ✔ Allowed |
-| Create, Manage, Delete users | ✘ Denied | ✘ Denied | ✔ Allowed |
+### Feature Matrix
+
+| Feature / Endpoint Group | Viewer | Analyst | Admin |
+|--------------------------|-------|---------|-------|
+| View records & basic summaries | [Yes] Allowed | [Yes] Allowed | [Yes] Allowed |
+| Advanced analytical trends & categories | [No] Denied | [Yes] Allowed | [Yes] Allowed |
+| Create, Update, Delete records | [No] Denied | [No] Denied | [Yes] Allowed |
+| Create, Manage, Delete users | [No] Denied | [No] Denied | [Yes] Allowed |
 
 ## 5. Non-Functional Architecture
 

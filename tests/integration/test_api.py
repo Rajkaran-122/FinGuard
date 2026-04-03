@@ -17,7 +17,7 @@ def test_login_invalid_credentials(client):
         "password": "wrongpassword"
     })
     assert response.status_code == 401
-    assert "Invalid email or password" in response.json()["detail"]
+    assert "Invalid email or password" in response.json()["message"]
 
 
 def test_admin_get_users(client, admin_headers):

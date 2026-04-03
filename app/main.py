@@ -70,21 +70,39 @@ def health_check():
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc: RequestValidationError):
+    """Standardized validation error payload."""
     return JSONResponse(
         status_code=422,
-        content={"error": "VALIDATION_FAILED", "detail": exc.errors()},
+        content={
+            "status": "error",
+            "message": "Validation failed",
+            "error": "VALIDATION_FAILED",
+            "data": exc.errors()
+        },
     )
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc: HTTPException):
+    """Standardized HTTP error payload."""
     return JSONResponse(
         status_code=exc.status_code,
-        content={"error": "CLIENT_ERROR", "detail": exc.detail},
+        content={
+            "status": "error",
+            "message": exc.detail,
+            "error": "CLIENT_ERROR",
+            "data": None
+        },
     )
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc: Exception):
+    """Standardized 500 error payload (avoids leaking stack traces)."""
     return JSONResponse(
         status_code=500,
-        content={"error": "SERVER_ERROR", "detail": "Internal server error. Please contact support."},
+        content={
+            "status": "error",
+            "message": "Internal server error. Please contact support.",
+            "error": "SERVER_ERROR",
+            "data": None
+        },
     )

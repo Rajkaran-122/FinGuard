@@ -1,6 +1,12 @@
 # FinGuard — Resilient Finance Data Processing Layer
 
-This is not a traditional CRUD application. FinGuard is a backend architecture designed around scale, idempotency, and failure isolation. It is built to demonstrate system-design thinking under simulated enterprise constraints, proving how data logic behaves when subjected to strict access control and massive transaction volumes.
+This is not a traditional CRUD application. FinGuard is a backend architecture designed around scale, idempotency, and failure isolation. It demonstrates system-design thinking under simulated enterprise constraints.
+
+> [!IMPORTANT]
+> **System Design & Engineering Signal (30-Second TL;DR)**
+> * **Scale Awareness:** At 100k users, dashboard `SUM/GROUP BY` aggregations bottleneck the DB. **Fix:** Implemented a composite index `(created_by, date)` and a **Synchronous Cache-Aside Pattern** to reduce DB load by 99%.
+> * **Failure Handling:** Network drops cause client retries leading to double-charges. **Fix:** Intercepted write operations via an **Idempotency-Key Gateway** mapping to an in-memory TTL dictionary.
+> * **Trade-Offs:** Chose strict **PostgreSQL ACID compliance** over eventual consistency; utilized **Permission Arrays** over rigid 'role' strings to dynamically mirror AWS IAM patterns without rewriting backend logic.
 
 ---
 

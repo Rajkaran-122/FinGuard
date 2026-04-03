@@ -1,5 +1,11 @@
 """
 Financial Record routes.
+
+SECURITY: All endpoints pass current_user to the service layer.
+The service layer determines data scope based on permissions:
+  - Admin users see all records
+  - Other users see only their own records
+This prevents IDOR attacks at the API boundary.
 """
 from datetime import date
 from typing import Optional
@@ -27,9 +33,10 @@ def list_records(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """List financial records with optional filters (All roles)."""
+    """List financial records with optional filters (ownership-scoped)."""
     return record_service.list_records(
         db=db,
+        current_user=current_user,
         record_type=record_type,
         category=category,
         date_from=date_from,
@@ -46,8 +53,8 @@ def get_record(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Fetch a single financial record by ID (All roles)."""
-    return record_service.get_record(db, record_id)
+    """Fetch a single financial record by ID (ownership-scoped)."""
+    return record_service.get_record(db, record_id, current_user)
 
 @router.post("/", response_model=RecordResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_permissions("records:write"))])
 def create_record(
@@ -81,12 +88,14 @@ def create_record(
 def update_record(
     request: RecordUpdate,
     record_id: str = Path(..., description="The ID of the record"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Full update of an existing record (Admin only)."""
+    """Full update of an existing record (Admin only, ownership-scoped)."""
     return record_service.update_record(
         db=db,
         record_id=record_id,
+        current_user=current_user,
         **request.model_dump()
     )
 
@@ -94,19 +103,22 @@ def update_record(
 def patch_record(
     request: RecordPartialUpdate,
     record_id: str = Path(..., description="The ID of the record"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Partial update of an existing record (Admin only)."""
+    """Partial update of an existing record (Admin only, ownership-scoped)."""
     return record_service.update_record(
         db=db,
         record_id=record_id,
+        current_user=current_user,
         **request.model_dump(exclude_unset=True)
     )
 
 @router.delete("/{record_id}", dependencies=[Depends(require_permissions("records:write"))])
 def delete_record(
     record_id: str = Path(..., description="The ID of the record"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Soft-delete a financial record (Admin only)."""
-    return record_service.delete_record(db, record_id)
+    """Soft-delete a financial record (Admin only, ownership-scoped)."""
+    return record_service.delete_record(db, record_id, current_user)

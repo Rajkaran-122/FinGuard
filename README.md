@@ -75,8 +75,36 @@ Navigate to **`http://localhost:8000/docs`** to explore the interactive Swagger 
 
 ## 📊 Running the CI Testing Suite
 
-We bypass local Database destruction by forcefully evaluating Pytest logic through temporary, isolated `SQLite :memory:` nodes dynamically overriding testing dependency hooks.
+The test suite includes **IDOR security tests** proving ownership enforcement, alongside standard CRUD and RBAC tests. Tests run against isolated `SQLite :memory:` nodes, dynamically overriding production dependency hooks.
 ```bash
-# Ensure you specify the environment override to exclude global extensions natively
-PYTHONNOUSERSITE=1 python -m pytest tests/ -v
+python -m pytest tests/ -v
 ```
+
+**Test coverage includes:**
+- ✅ Health check and authentication validation
+- ✅ Admin CRUD operations with cache consistency
+- ✅ Unauthorized access blocked (401)
+- ✅ **IDOR Protection**: Viewer cannot access admin's records by UUID
+- ✅ **Ownership Scoping**: Viewer's record list excludes other users' data
+- ✅ **Summary Isolation**: Viewer's dashboard aggregations only reflect their own records
+
+---
+
+## 🔐 Security & Data Isolation
+
+FinGuard enforces **multi-tenant data isolation** at the repository layer:
+
+| User Role | Records Visible | Dashboard Scope | Write Access |
+|-----------|----------------|-----------------|--------------|
+| Admin | All records | Organization-wide | Full CRUD |
+| Analyst | Own records only | Own data only | Read-only |
+| Viewer | Own records only | Own data only | Read-only |
+
+**IDOR Prevention**: All queries pass through `_active_records(db, user_id=scope)`. Non-admin users can only query records where `created_by == their_id`. The system returns `404` (not `403`) for unauthorized record access to prevent information leakage about record existence.
+
+---
+
+## 📚 Additional Documentation
+
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** — Deep-dive design justifications and layering decisions
+- **[INTERVIEW_PREP.md](INTERVIEW_PREP.md)** — System design thinking: scale analysis, failure scenarios, trade-offs, and security design explained for technical discussions

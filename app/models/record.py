@@ -49,11 +49,14 @@ class FinancialRecord(Base):
     )
 
     # Indexes for common query patterns
+    # PERFORMANCE: Composite index covers the most frequent aggregation queries
+    # (GROUP BY type, category WHERE date BETWEEN x AND y AND created_by = z)
     __table_args__ = (
         Index("idx_records_date", "date"),
         Index("idx_records_type", "type"),
         Index("idx_records_category", "category"),
         Index("idx_records_created_by", "created_by"),
+        Index("idx_records_owner_date", "created_by", "date"),  # Ownership + time range queries
     )
 
     def __repr__(self):

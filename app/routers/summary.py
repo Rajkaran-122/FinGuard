@@ -1,5 +1,9 @@
 """
 Dashboard Summary routes.
+
+SECURITY: All endpoints pass current_user to the service layer for
+ownership-scoped data access. Viewers see only their own aggregations.
+Admins see organization-wide totals.
 """
 from datetime import date
 from typing import Optional
@@ -20,17 +24,18 @@ def get_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Returns total income, expenses, and net balance (All roles)."""
-    return summary_service.get_summary(db, date_from, date_to)
+    """Returns total income, expenses, and net balance (ownership-scoped)."""
+    return summary_service.get_summary(db, current_user, date_from, date_to)
 
 @router.get("/categories", response_model=CategoryResponse, dependencies=[Depends(require_permissions("dashboard:view"))])
 def get_categories(
     date_from: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
     date_to: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Category-wise income and expense breakdown (Admin, Analyst)."""
-    return summary_service.get_categories(db, date_from, date_to)
+    """Category-wise income and expense breakdown (ownership-scoped)."""
+    return summary_service.get_categories(db, current_user, date_from, date_to)
 
 @router.get("/recent", response_model=RecentActivityResponse)
 def get_recent(
@@ -38,14 +43,15 @@ def get_recent(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Recent transactions (All roles)."""
-    return summary_service.get_recent(db, limit)
+    """Recent transactions (ownership-scoped)."""
+    return summary_service.get_recent(db, current_user, limit)
 
 @router.get("/trends", response_model=TrendResponse, dependencies=[Depends(require_permissions("dashboard:view"))])
 def get_trends(
     date_from: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
     date_to: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Monthly/weekly aggregated trend data (Admin, Analyst)."""
-    return summary_service.get_trends(db, date_from, date_to)
+    """Monthly/weekly aggregated trend data (ownership-scoped)."""
+    return summary_service.get_trends(db, current_user, date_from, date_to)

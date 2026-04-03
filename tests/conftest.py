@@ -56,7 +56,7 @@ def client(db_session):
 
 @pytest.fixture(scope="function")
 def admin_user(db_session):
-    """Creates a mock admin user in DB."""
+    """Creates a mock admin user in DB with full permissions."""
     user = User(
         name="Admin Test",
         email="admin_test@finance.dev",
@@ -78,3 +78,30 @@ def admin_token(admin_user):
 def admin_headers(admin_token):
     """Returns Auth headers block for test client."""
     return {"Authorization": f"Bearer {admin_token}"}
+
+# --- IDOR Test Fixtures ---
+
+@pytest.fixture(scope="function")
+def viewer_user(db_session):
+    """Creates a restricted viewer user with read-only permissions."""
+    user = User(
+        name="Viewer Test",
+        email="viewer_test@finance.dev",
+        password_hash=hash_password("Viewer@123"),
+        role=UserRole.VIEWER,
+        permissions=["dashboard:view", "records:read"]
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+@pytest.fixture(scope="function")
+def viewer_token(viewer_user):
+    """Returns JWT token for the viewer user."""
+    return create_access_token({"sub": viewer_user.id, "role": viewer_user.role.value})
+
+@pytest.fixture(scope="function")
+def viewer_headers(viewer_token):
+    """Returns Auth headers for viewer user."""
+    return {"Authorization": f"Bearer {viewer_token}"}

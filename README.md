@@ -93,11 +93,21 @@ docker compose up -d
 ```
 
 ### 2. Virtual Environment Setup
+
+**Mac/Linux:**
 ```bash
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+python -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
+```
+
+**Windows (PowerShell):**
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+copy .env.example .env
 ```
 
 ### 3. Migrations & Seed Data
@@ -112,7 +122,11 @@ python scripts/seed.py
 
 ### 4. Execute Backend
 ```bash
+# Mac/Linux
 uvicorn app.main:app --reload
+
+# Windows (if global uvicorn fails, execute relative to venv)
+.\venv\Scripts\uvicorn.exe app.main:app --reload
 ```
 Navigate natively to **`http://localhost:8000/docs`** to explore the Swagger UI endpoints.
 

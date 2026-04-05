@@ -1,6 +1,22 @@
-version: '3.8'
-
 services:
+  api:
+    build: .
+    container_name: finguard-api
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://finance_user:finance_password@db:5432/finance_db
+      ENVIRONMENT: development
+      APP_TITLE: FinGuard API
+      APP_VERSION: 1.0.0
+      JWT_SECRET: your-super-secret-key-change-this-in-production-min-32-chars
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRY_HOURS: 24
+      CORS_ORIGINS: http://localhost:3000,http://localhost:8080
+    depends_on:
+      - db
+
   db:
     image: postgres:15-alpine
     container_name: finguard-postgres

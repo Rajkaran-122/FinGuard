@@ -3,14 +3,14 @@ Seed script to populate initial data for testing.
 """
 import sys
 import os
-from datetime import datetime, timedelta, date, timezone
+from datetime import timedelta, date
 from decimal import Decimal
 import random
 
 # Add project root to python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from app.core.database import SessionLocal, Base, engine
+from app.core.database import SessionLocal
 from app.models.user import User, UserRole
 from app.models.record import FinancialRecord, RecordType
 from app.core.security import hash_password

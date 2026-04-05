@@ -4,7 +4,7 @@ Database Configuration
 SQLAlchemy engine with WAL mode and FK enforcement for SQLite.
 """
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from app.core.config import settings
 

@@ -129,8 +129,12 @@ uvicorn app.main:app --reload
 .\venv\Scripts\uvicorn.exe app.main:app --reload
 ```
 Navigate natively to **`http://localhost:8000/docs`** to explore the Swagger UI endpoints.
-
-![Swagger UI Screenshot](assets/swagger_ui_screenshot.png)
+ 
+### API Documentation Preview (Swagger UI)
+ 
+| **API Overview** | **Endpoint Details** | **Response Schema** |
+|:---:|:---:|:---:|
+| ![Swagger Overview](assets/swagger_1.png) | ![Swagger Endpoints](assets/swagger_2.png) | ![Swagger Responses](assets/swagger_3.png) |
 
 ### How to demo fast (reviewer path)
 1. `docker compose up -d` (API + Postgres)

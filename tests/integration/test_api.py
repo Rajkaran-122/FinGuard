@@ -33,6 +33,48 @@ def test_admin_get_users(client, admin_headers):
     assert data["total"] >= 1  # The admin user from fixture
 
 
+def test_idempotent_record_creation(client, admin_headers):
+    """Repeated POST with same Idempotency-Key returns same record without duplicates."""
+    record_payload = {
+        "amount": 123.45,
+        "type": "income",
+        "category": "IdemTest",
+        "date": "2025-02-02",
+        "notes": "First post"
+    }
+    headers = {**admin_headers, "Idempotency-Key": "idem-key-1"}
+
+    first = client.post("/api/records/", json=record_payload, headers=headers)
+    assert first.status_code == 201
+    first_id = first.json()["data"]["id"]
+
+    second = client.post("/api/records/", json=record_payload, headers=headers)
+    assert second.status_code == 201
+    second_id = second.json()["data"]["id"]
+
+    assert first_id == second_id
+
+
+def test_idempotent_conflict_on_payload_change(client, admin_headers):
+    """Reusing the same Idempotency-Key with different payload yields 409."""
+    headers = {**admin_headers, "Idempotency-Key": "idem-key-2"}
+
+    base_payload = {
+        "amount": 200.00,
+        "type": "income",
+        "category": "Base",
+        "date": "2025-03-03",
+        "notes": "Base payload"
+    }
+    alt_payload = {**base_payload, "amount": 250.00}
+
+    first = client.post("/api/records/", json=base_payload, headers=headers)
+    assert first.status_code == 201
+
+    second = client.post("/api/records/", json=alt_payload, headers=headers)
+    assert second.status_code == 409
+
+
 def test_admin_create_and_summary_record(client, admin_headers):
     """Test admin can create a record and it appears in summary."""
     # Create income record
@@ -43,7 +85,11 @@ def test_admin_create_and_summary_record(client, admin_headers):
         "date": "2025-01-15",
         "notes": "Test salary"
     }
-    response = client.post("/api/records/", json=record_payload, headers=admin_headers)
+    response = client.post(
+        "/api/records/",
+        json=record_payload,
+        headers={**admin_headers, "Idempotency-Key": "test-create-1"},
+    )
     assert response.status_code == 201
     
     # Unwrap creation response
@@ -90,7 +136,11 @@ def test_viewer_cannot_see_admin_records(client, admin_headers, viewer_headers):
         "date": "2025-06-01",
         "notes": "Confidential admin record"
     }
-    create_response = client.post("/api/records/", json=record_payload, headers=admin_headers)
+    create_response = client.post(
+        "/api/records/",
+        json=record_payload,
+        headers={**admin_headers, "Idempotency-Key": "test-admin-secret"},
+    )
     assert create_response.status_code == 201
     admin_record_id = create_response.json()["data"]["id"]
 
@@ -105,10 +155,14 @@ def test_viewer_sees_only_own_records_in_list(client, admin_headers, viewer_head
     SECURITY TEST: Verify viewer's record list doesn't include admin's records.
     """
     # Admin creates a record
-    client.post("/api/records/", json={
-        "amount": 5000.00, "type": "expense", "category": "Admin Only",
-        "date": "2025-07-01", "notes": "Should not appear for viewer"
-    }, headers=admin_headers)
+    client.post(
+        "/api/records/",
+        json={
+            "amount": 5000.00, "type": "expense", "category": "Admin Only",
+            "date": "2025-07-01", "notes": "Should not appear for viewer"
+        },
+        headers={**admin_headers, "Idempotency-Key": "test-admin-only"},
+    )
 
     # Viewer lists their records — should see 0 (they haven't created any)
     viewer_list = client.get("/api/records/", headers=viewer_headers)
@@ -121,10 +175,14 @@ def test_viewer_summary_is_scoped(client, admin_headers, viewer_headers):
     SECURITY TEST: Verify viewer's dashboard summary only reflects their own data.
     """
     # Admin creates a 10000 income record
-    client.post("/api/records/", json={
-        "amount": 10000.00, "type": "income", "category": "Admin Revenue",
-        "date": "2025-08-01", "notes": "Admin only income"
-    }, headers=admin_headers)
+    client.post(
+        "/api/records/",
+        json={
+            "amount": 10000.00, "type": "income", "category": "Admin Revenue",
+            "date": "2025-08-01", "notes": "Admin only income"
+        },
+        headers={**admin_headers, "Idempotency-Key": "test-admin-revenue"},
+    )
 
     # Viewer's summary should show 0 income (they have no records)
     viewer_summary = client.get("/api/dashboard/summary", headers=viewer_headers)

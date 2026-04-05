@@ -64,5 +64,5 @@ def count_admins(db: Session) -> int:
     """Count active admin users — prevents deleting the last admin."""
     return db.query(User).filter(
         User.role == UserRole.ADMIN,
-        User.is_active == True
+        User.is_active.is_(True)
     ).count()

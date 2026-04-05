@@ -130,6 +130,31 @@ uvicorn app.main:app --reload
 ```
 Navigate natively to **`http://localhost:8000/docs`** to explore the Swagger UI endpoints.
 
+### How to demo fast (reviewer path)
+1. `docker compose up -d` (API + Postgres)
+2. `python scripts/seed.py` (creates admin/viewer/analyst)
+3. Open `http://localhost:8000/docs` and call **POST /api/records** with header `Idempotency-Key: <uuid>` then view **GET /api/dashboard/summary** to see cached aggregation.
+
+### What to review first
+1. `app/services/record_service.py` for ownership scope and business flow.
+2. `app/repositories/record_repository.py` for SQL-level aggregation, soft-delete filtering, and audits.
+3. `tests/integration/test_api.py` for RBAC, idempotency replay, and IDOR protection checks.
+
+### Dev commands
+```bash
+make dev
+make test
+make seed
+make perf-smoke
+```
+If `make` is unavailable (common on Windows), use:
+```powershell
+python -m uvicorn app.main:app --reload
+python -m pytest tests/ -v
+python scripts/seed.py
+python scripts/perf_smoke.py --rows 100000 --target-ms 150
+```
+
 ---
 
 ## Test Suite Execution

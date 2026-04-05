@@ -130,6 +130,8 @@ uvicorn app.main:app --reload
 ```
 Navigate natively to **`http://localhost:8000/docs`** to explore the Swagger UI endpoints.
 
+![Swagger UI Screenshot](assets/swagger_ui_screenshot.png)
+
 ### How to demo fast (reviewer path)
 1. `docker compose up -d` (API + Postgres)
 2. `python scripts/seed.py` (creates admin/viewer/analyst)

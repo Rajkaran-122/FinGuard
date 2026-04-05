@@ -81,15 +81,14 @@ def get_record_by_id(
     return _active_records(db, user_id).filter(FinancialRecord.id == record_id).first()
 
 
-import json
-
-def _log_audit(db: Session, record_id: str, action: str, old_dict: dict, new_dict: dict):
+def _log_audit(db: Session, record_id: str, action: str, actor_id: str, old_dict: dict, new_dict: dict):
     from app.models.record import FinancialRecordAudit
     db.add(FinancialRecordAudit(
         record_id=record_id,
         action_type=action,
-        old_state=json.dumps(old_dict, default=str),
-        new_state=json.dumps(new_dict, default=str)
+        actor_id=actor_id,
+        old_state=old_dict,
+        new_state=new_dict
     ))
 
 def get_records(
@@ -147,9 +146,27 @@ def get_records(
     return records, total, next_cursor
 
 
-def update_record(db: Session, record: FinancialRecord, **kwargs) -> FinancialRecord:
+def _to_serializable(value):
+    """Normalize ORM values into JSON-serializable primitives."""
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if hasattr(value, "value"):
+        return value.value
+    return value
+
+
+def _snapshot(record: FinancialRecord) -> dict:
+    """Capture current record state for audit trail."""
+    return {c.name: _to_serializable(getattr(record, c.name)) for c in record.__table__.columns}
+
+
+def update_record(db: Session, record: FinancialRecord, actor_id: str, **kwargs) -> FinancialRecord:
     """Update record with Immutable Audit Logs."""
-    old_state = {c.name: getattr(record, c.name) for c in record.__table__.columns}
+    old_state = _snapshot(record)
     for key, value in kwargs.items():
         if value is not None:
             if key == "type":
@@ -157,8 +174,8 @@ def update_record(db: Session, record: FinancialRecord, **kwargs) -> FinancialRe
             else:
                 setattr(record, key, value)
 
-    new_state = {c.name: getattr(record, c.name) for c in record.__table__.columns}
-    _log_audit(db, record.id, "UPDATE", old_state, new_state)
+    new_state = _snapshot(record)
+    _log_audit(db, record.id, "UPDATE", actor_id, old_state, new_state)
 
     db.commit()
     db.refresh(record)
@@ -168,13 +185,13 @@ def update_record(db: Session, record: FinancialRecord, **kwargs) -> FinancialRe
     return record
 
 
-def soft_delete_record(db: Session, record: FinancialRecord) -> FinancialRecord:
+def soft_delete_record(db: Session, record: FinancialRecord, actor_id: str) -> FinancialRecord:
     """Soft-delete triggers an Immutable Audit trail."""
-    old_state = {c.name: getattr(record, c.name) for c in record.__table__.columns}
+    old_state = _snapshot(record)
     record.deleted_at = datetime.now(timezone.utc)
-    new_state = {c.name: getattr(record, c.name) for c in record.__table__.columns}
+    new_state = _snapshot(record)
 
-    _log_audit(db, record.id, "SOFT_DELETE", old_state, new_state)
+    _log_audit(db, record.id, "SOFT_DELETE", actor_id, old_state, new_state)
 
     db.commit()
     db.refresh(record)

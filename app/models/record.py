@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column, String, Numeric, Date, Text, DateTime,
-    Enum, ForeignKey, Index,
+    Enum, ForeignKey, Index, JSON
 )
 from app.core.database import Base
 
@@ -56,7 +56,9 @@ class FinancialRecord(Base):
         Index("idx_records_type", "type"),
         Index("idx_records_category", "category"),
         Index("idx_records_created_by", "created_by"),
-        Index("idx_records_owner_date", "created_by", "date"),  # Ownership + time range queries
+        Index("idx_records_created_by_date", "created_by", "date"),  # Ownership + time range queries
+        Index("idx_records_category_type", "category", "type"),
+        Index("idx_records_created_at", "created_at"),
     )
 
     def __repr__(self):
@@ -69,11 +71,12 @@ class FinancialRecordAudit(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     record_id = Column(String(36), ForeignKey("financial_records.id", ondelete="CASCADE"), nullable=False)
     action_type = Column(String(50), nullable=False) 
-    old_state = Column(Text, nullable=True)
-    new_state = Column(Text, nullable=True)
+    actor_id = Column(String(36), nullable=True)
+    old_state = Column(JSON().with_variant(Text, "sqlite"), nullable=True)
+    new_state = Column(JSON().with_variant(Text, "sqlite"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     __table_args__ = (
         Index("idx_audit_record_id", "record_id"),
+        Index("idx_audit_actor_id", "actor_id"),
     )
-

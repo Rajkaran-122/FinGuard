@@ -17,7 +17,7 @@ def register_user(db: Session, name: str, email: str, password: str, role: str) 
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A user with this email already exists",
+            detail={"message": "A user with this email already exists", "code": "VALIDATION_FAILED"},
         )
 
     user = user_repository.create_user(
@@ -45,13 +45,13 @@ def login_user(db: Session, email: str, password: str) -> dict:
     if not user or not verify_password(password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
+            detail={"message": "Invalid email or password", "code": "AUTH_REQUIRED"},
         )
 
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is deactivated",
+            detail={"message": "User account is deactivated", "code": "PERMISSION_DENIED"},
         )
 
     token = create_access_token({"sub": user.id, "role": user.role.value})

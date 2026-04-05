@@ -9,11 +9,11 @@ This prevents IDOR attacks at the API boundary.
 """
 from datetime import date
 from typing import Optional
-from fastapi import APIRouter, Depends, status, Query, Path, Header
+from fastapi import APIRouter, Depends, status, Query, Path, Header, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_db, get_current_user, require_permissions
-from app.core.idempotency import idempotency_cache
+from app.core.idempotency import idempotency_manager, make_fingerprint
 from app.schemas.record import RecordCreate, RecordUpdate, RecordPartialUpdate, RecordResponse, RecordListResponse
 from app.schemas.common import ResponseWrapper
 from app.services import record_service
@@ -67,25 +67,41 @@ def create_record(
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key", description="Unique UUID to prevent duplicate transaction entries.")
 ):
     """Create a new financial record (Admin only)."""
-    if idempotency_key:
-        cached_response = idempotency_cache.get_response(idempotency_key)
-        if cached_response:
-            return {"status": "success", "message": "Record retrieved from cache", "data": cached_response}
+    if not idempotency_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": "Idempotency-Key header is required", "code": "VALIDATION_FAILED"},
+        )
 
-    record = record_service.create_record(
-        db=db,
-        amount=request.amount,
-        record_type=request.type,
-        category=request.category,
-        record_date=request.date,
-        created_by=current_user.id,
-        notes=request.notes
+    fingerprint = make_fingerprint(
+        method="POST",
+        path="/api/records",
+        body=request.model_dump(),
+        user_id=current_user.id,
     )
 
-    if idempotency_key:
-        idempotency_cache.save_response(idempotency_key, record)
+    def _create():
+        record = record_service.create_record(
+            db=db,
+            amount=request.amount,
+            record_type=request.type,
+            category=request.category,
+            record_date=request.date,
+            created_by=current_user.id,
+            notes=request.notes
+        )
+        # Persist a JSON-serializable payload
+        return RecordResponse.model_validate(record).model_dump()
 
-    return {"status": "success", "message": "Record created successfully", "data": record}
+    record_payload = idempotency_manager.process(
+        db=db,
+        key=idempotency_key,
+        fingerprint=fingerprint,
+        user_id=current_user.id,
+        compute_response=_create,
+    )
+
+    return {"status": "success", "message": "Record created successfully", "data": record_payload}
 
 @router.put("/{record_id}", response_model=ResponseWrapper[RecordResponse], dependencies=[Depends(require_permissions("records:write"))])
 def update_record(

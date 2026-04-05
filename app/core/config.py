@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRY_HOURS: int = 24
 
+    # Idempotency / caching
+    IDEMPOTENCY_TTL_SECONDS: int = 86400
+    IDEMPOTENCY_CLEANUP_INTERVAL_SECONDS: int = 300
+
     # Application
     ENVIRONMENT: str = "development"
     APP_TITLE: str = "FinGuard API"

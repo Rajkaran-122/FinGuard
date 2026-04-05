@@ -79,7 +79,10 @@ def get_record(db: Session, record_id: str, current_user: User):
     scope = _get_scope(current_user)
     record = record_repository.get_record_by_id(db, record_id, user_id=scope)
     if not record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"message": "Record not found", "code": "RECORD_NOT_FOUND"},
+        )
     return record
 
 
@@ -88,9 +91,12 @@ def update_record(db: Session, record_id: str, current_user: User, **kwargs):
     scope = _get_scope(current_user)
     record = record_repository.get_record_by_id(db, record_id, user_id=scope)
     if not record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"message": "Record not found", "code": "RECORD_NOT_FOUND"},
+        )
 
-    updated = record_repository.update_record(db, record, **kwargs)
+    updated = record_repository.update_record(db, record, actor_id=current_user.id, **kwargs)
     cache_service.invalidate_prefix("dashboard_")
     return updated
 
@@ -100,8 +106,11 @@ def delete_record(db: Session, record_id: str, current_user: User):
     scope = _get_scope(current_user)
     record = record_repository.get_record_by_id(db, record_id, user_id=scope)
     if not record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"message": "Record not found", "code": "RECORD_NOT_FOUND"},
+        )
 
-    record_repository.soft_delete_record(db, record)
+    record_repository.soft_delete_record(db, record, actor_id=current_user.id)
     cache_service.invalidate_prefix("dashboard_")
     return {"detail": "Record deleted successfully"}

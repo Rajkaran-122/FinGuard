@@ -5,7 +5,8 @@ Main application entrypoint. Assembles the FastAPI instance,
 configures CORS, registers routers, and sets up exception handling.
 """
 
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+import asyncio
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,18 +15,27 @@ from fastapi.exceptions import RequestValidationError
 from fastapi import HTTPException
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+import os
+from alembic import command
+from alembic.config import Config
 
 from app.core.config import settings
-from app.core.database import engine, Base
+from app.core.database import engine, Base, SessionLocal
 from app.core.logging import StructuredLoggingMiddleware
 from app.core.rate_limit import limiter
+from app.core.idempotency import idempotency_manager
 from app.routers import auth, users, records, summary
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Ensure tables are created (in production, use Alembic via CLI)
-    Base.metadata.create_all(bind=engine)
-    yield
+    run_migrations()
+    cleanup_task = asyncio.create_task(_idempotency_cleanup_loop())
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await cleanup_task
 
 app = FastAPI(
     title=settings.APP_TITLE,
@@ -84,13 +94,22 @@ async def validation_exception_handler(request, exc: RequestValidationError):
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc: HTTPException):
     """Standardized HTTP error payload."""
+    detail = exc.detail
+    if isinstance(detail, dict):
+        message = detail.get("message", "Request failed")
+        code = detail.get("code", "CLIENT_ERROR")
+        data = detail.get("details")
+    else:
+        message = detail
+        code = "CLIENT_ERROR"
+        data = None
     return JSONResponse(
         status_code=exc.status_code,
         content={
             "status": "error",
-            "message": exc.detail,
-            "error": "CLIENT_ERROR",
-            "data": None
+            "message": message,
+            "error": code,
+            "data": data
         },
     )
 
@@ -106,3 +125,31 @@ async def global_exception_handler(request, exc: Exception):
             "data": None
         },
     )
+
+
+def run_migrations():
+    """
+    Run Alembic migrations on startup for Postgres; fallback to metadata create on SQLite.
+    Skips tests/in-memory SQLite to avoid interfering with fixtures.
+    """
+    backend = engine.url.get_backend_name()
+    if backend.startswith("sqlite"):
+        Base.metadata.create_all(bind=engine)
+        return
+
+    alembic_ini = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "alembic.ini"))
+    script_location = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "alembic"))
+    alembic_cfg = Config(alembic_ini)
+    alembic_cfg.set_main_option("script_location", script_location)
+    command.upgrade(alembic_cfg, "head")
+
+
+async def _idempotency_cleanup_loop():
+    """Background cleanup for expired idempotency records."""
+    while True:
+        db = SessionLocal()
+        try:
+            idempotency_manager.cleanup_expired(db, limit=200)
+        finally:
+            db.close()
+        await asyncio.sleep(settings.IDEMPOTENCY_CLEANUP_INTERVAL_SECONDS)

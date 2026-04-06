@@ -47,7 +47,7 @@ This isolates security logic, simplifies unit testing, and is inherently support
 
 ### 5.1 Tech Stack Justification
 - **FastAPI vs Flask/Django**: Chosen specifically because it is an API-first framework integrating Pydantic validations intrinsically while exposing self-documenting endpoints.
-- **SQLite Database Strategy**: Employs WAL (Write-Ahead Logging) via DB Pragma connecting limits blocking phenomena making it extremely efficient as an evaluation candidate without compromising data schema normalization logic that directly ports to PostgreSQL.
+- **PostgreSQL Database Strategy**: Employs robust PostgreSQL schemas enforcing complex constraints at the database level. Ensures completely transactional consistency with high concurrent read-write stability during dashboard data ingestion phases. SQLite is preserved solely as an in-memory test double for instantaneous unit/integration pipelines.
 - **Testing**: Complete suite built using `pytest` interacting identically via `TestClient` and pure ephemeral in-memory database isolation pools per-run ensuring completely stateless evaluation pipelines.
 
 ## 6. Implementation & Delivery Rules

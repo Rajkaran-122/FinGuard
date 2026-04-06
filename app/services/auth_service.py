@@ -12,7 +12,14 @@ from app.repositories import user_repository
 
 
 def register_user(db: Session, name: str, email: str, password: str, role: str) -> dict:
-    """Register a new user. Raises 400 if email already exists."""
+    """
+    Register a new user via the public endpoint.
+
+    SECURITY: The client-provided 'role' is IGNORED. All self-registered
+    users are assigned 'viewer' with minimal permissions. Elevated roles
+    (analyst, admin) must be granted by an existing admin via /api/users.
+    This prevents privilege-escalation attacks on the public registration endpoint.
+    """
     existing = user_repository.get_user_by_email(db, email)
     if existing:
         raise HTTPException(
@@ -20,12 +27,15 @@ def register_user(db: Session, name: str, email: str, password: str, role: str) 
             detail={"message": "A user with this email already exists", "code": "VALIDATION_FAILED"},
         )
 
+    # SECURITY: Force viewer role on public registration — ignore client input
+    safe_role = "viewer"
+
     user = user_repository.create_user(
         db=db,
         name=name,
         email=email,
         password_hash=hash_password(password),
-        role=role,
+        role=safe_role,
     )
 
     token = create_access_token({"sub": user.id, "role": user.role.value})

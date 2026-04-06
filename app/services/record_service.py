@@ -4,12 +4,14 @@ Record Service
 Financial record business rules with ownership-scoped data access.
 
 SECURITY DESIGN: Every operation receives the current_user object.
-The service determines the effective user_id scope:
+The service determines the effective user_id scope via the shared
+`get_data_scope()` utility:
   - Admin users (with 'records:write' permission) -> user_id=None (see all)
   - All other users -> user_id=current_user.id (see only own data)
 
-This ensures IDOR protection at the service boundary before any
-database query is executed.
+CACHE INVALIDATION: All cache invalidation happens HERE in the service
+layer — not in the repository. The repository is a pure data-access
+layer that should not be aware of caching concerns.
 """
 
 from datetime import date
@@ -21,24 +23,8 @@ from sqlalchemy.orm import Session
 
 from app.repositories import record_repository
 from app.core.cache import cache_service
+from app.core.scope import get_data_scope
 from app.models.user import User
-
-
-def _get_scope(user: User) -> Optional[str]:
-    """
-    Determine data scope based on user permissions.
-
-    Returns None for admin-level users (no ownership filter),
-    or the user's ID to scope queries to their own records.
-
-    This is the SINGLE function that controls multi-tenancy behavior.
-    Adding a new role (e.g., 'Auditor') only requires granting them
-    the appropriate permissions — zero code changes needed.
-    """
-    user_perms = user.permissions or []
-    if "records:write" in user_perms or "users:manage" in user_perms:
-        return None  # Admin-level: see all records
-    return user.id  # Scoped: see only own records
 
 
 def create_record(
@@ -49,7 +35,14 @@ def create_record(
     record = record_repository.create_record(
         db, amount, record_type, category, record_date, created_by, notes
     )
-    cache_service.invalidate_prefix("dashboard_")
+    # Scope invalidation to the specific user to avoid thundering herd
+    cache_service.invalidate_prefix(f"dashboard_summary_{created_by}")
+    cache_service.invalidate_prefix(f"dashboard_categories_{created_by}")
+    cache_service.invalidate_prefix(f"dashboard_trends_{created_by}")
+    # Also invalidate admin-scoped (None) caches
+    cache_service.invalidate_prefix("dashboard_summary_None")
+    cache_service.invalidate_prefix("dashboard_categories_None")
+    cache_service.invalidate_prefix("dashboard_trends_None")
     return record
 
 
@@ -61,7 +54,7 @@ def list_records(
     page: int = 1, limit: int = 50,
 ):
     """List records scoped to user ownership."""
-    scope = _get_scope(current_user)
+    scope = get_data_scope(current_user)
     records, total, next_cursor = record_repository.get_records(
         db, record_type, category, date_from, date_to, search, cursor, page, limit,
         user_id=scope,
@@ -76,7 +69,7 @@ def get_record(db: Session, record_id: str, current_user: User):
     SECURITY: Returns 404 (not 403) when record exists but belongs to
     another user. This prevents attackers from confirming record existence.
     """
-    scope = _get_scope(current_user)
+    scope = get_data_scope(current_user)
     record = record_repository.get_record_by_id(db, record_id, user_id=scope)
     if not record:
         raise HTTPException(
@@ -88,7 +81,7 @@ def get_record(db: Session, record_id: str, current_user: User):
 
 def update_record(db: Session, record_id: str, current_user: User, **kwargs):
     """Full or partial update with ownership check and Cache Invalidation."""
-    scope = _get_scope(current_user)
+    scope = get_data_scope(current_user)
     record = record_repository.get_record_by_id(db, record_id, user_id=scope)
     if not record:
         raise HTTPException(
@@ -97,13 +90,18 @@ def update_record(db: Session, record_id: str, current_user: User, **kwargs):
         )
 
     updated = record_repository.update_record(db, record, actor_id=current_user.id, **kwargs)
-    cache_service.invalidate_prefix("dashboard_")
+    cache_service.invalidate_prefix(f"dashboard_summary_{record.created_by}")
+    cache_service.invalidate_prefix(f"dashboard_categories_{record.created_by}")
+    cache_service.invalidate_prefix(f"dashboard_trends_{record.created_by}")
+    cache_service.invalidate_prefix("dashboard_summary_None")
+    cache_service.invalidate_prefix("dashboard_categories_None")
+    cache_service.invalidate_prefix("dashboard_trends_None")
     return updated
 
 
 def delete_record(db: Session, record_id: str, current_user: User):
     """Soft-delete with ownership check and Cache Invalidation."""
-    scope = _get_scope(current_user)
+    scope = get_data_scope(current_user)
     record = record_repository.get_record_by_id(db, record_id, user_id=scope)
     if not record:
         raise HTTPException(
@@ -111,6 +109,12 @@ def delete_record(db: Session, record_id: str, current_user: User):
             detail={"message": "Record not found", "code": "RECORD_NOT_FOUND"},
         )
 
+    owner_id = record.created_by
     record_repository.soft_delete_record(db, record, actor_id=current_user.id)
-    cache_service.invalidate_prefix("dashboard_")
+    cache_service.invalidate_prefix(f"dashboard_summary_{owner_id}")
+    cache_service.invalidate_prefix(f"dashboard_categories_{owner_id}")
+    cache_service.invalidate_prefix(f"dashboard_trends_{owner_id}")
+    cache_service.invalidate_prefix("dashboard_summary_None")
+    cache_service.invalidate_prefix("dashboard_categories_None")
+    cache_service.invalidate_prefix("dashboard_trends_None")
     return {"detail": "Record deleted successfully"}

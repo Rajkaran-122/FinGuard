@@ -1,43 +1,48 @@
-# Architectural Trade-Offs & Senior Engineering Decisions
+# Architecture Decisions
 
-This document highlights the principal engineering evaluations justifying the design of the **FinGuard** backend framework demonstrating explicit awareness of production friction vs system scale parameters.
+This document captures the core architectural design and trade-offs for the FinGuard backend.
 
-## 1. Why FastAPI? (Framework Choice)
+## 1. Core Architecture Pattern: Layered (N-Tier)
 
-### Trade-Off Evaluated: Django (Full-Battery) vs Flask (Micro) vs FastAPI (API-First)
+The project enforces a strict, unidirectional flow of control:
+`Router ➔ Service ➔ Repository ➔ ORM/Database`
 
-- **The Decision:** **FastAPI**
-- **Justification:** Enterprise finance requirements demand explicit schemas and predictable Input/Output serialization. Django is heavily bound to its internal ORM and monolithic template layouts making headless RESTful API microservices occasionally contentious. Flask lacks intrinsic typing constraints requiring extensive 3rd-party validation plugins (Marshmallow). 
-- **The specific "Top 1%" Benefit:** FastAPI forces Pydantic integration at zero cost blocking malicious and malformed inputs prior to business logic execution. Furthermore, generating automated Swagger specifications reduces manual YAML documentation drift completely.
+- **Routers**: Handle HTTP, request validation (Pydantic), and Dependency Injection for authentication/authorization.
+- **Services**: House pure business logic, orchestrate cache invalidations, and enforce data scope (multi-tenancy) so business rules are separated from transport rules.
+- **Repositories**: Handle all SQLAlchemy queries. They do not know about HTTP, caches, or users — they execute parameterized SQL.
 
-## 2. Why Layered Service/Repository Separation?
+*Trade-off*: Adds some boilerplate (passing data between layers), but guarantees testability and prevents "God controllers".
 
-### Trade-Off Evaluated: Active Record (Routers touch DB directly) vs Data Mapper (Services/Repositories)
+## 2. Database Choice: PostgreSQL
 
-- **The Decision:** **Strict Layering (Routes → Services → Repositories)**
-- **Justification:** In average API constructs, developers inject SQLAlchemy DB sessions directly inside `@router` controllers executing `db.query(...)`. If complex finance formula rules fluctuate, the developer is forced to mock extensive HTTP pipeline mechanics just to evaluate computation arrays. 
-- **The specific "Top 1%" Benefit:** Relocating raw `DB` connectivity to `app/repositories/` ensures data mapping boundaries are completely respected. `app/services/` holds entirely agnostic business algorithms orchestrating multiple repositories together cleanly making core application behavior strictly isolated, deeply comprehensive, and trivially testable.
+We chose PostgreSQL as the primary persistence layer over simpler alternatives like SQLite or managed multi-model NoSQL databases.
 
-## 3. Why SQLite configured with WAL Parameters?
+- **Reasoning**: Financial systems demand absolute consistency. PostgreSQL guarantees robust ACID compliance and handles complex aggregations (needed for the dashboard) exceptionally well.
+- **Why not MongoDB**: Relational data (users own records, records belong to categories) queried strictly through tabular aggregates is perfectly suited for SQL. NoSQL would force fragile application-side joins for our dashboard metrics.
+- **Local Dev / Testing**: SQLAlchemy abstracts the dialect perfectly, allowing us to drop to an in-memory SQLite database solely for lightning-fast test execution while deploying to a robust PostgreSQL setup in production.
 
-### Trade-Off Evaluated: Default SQLite vs Dockerized PostgreSQL
+## 3. Caching Strategy: Bounded Cache-Aside
 
-- **The Decision:** **SQLite (Enabled with Write-Ahead Logging via `PRAGMA journal_mode=WAL`)**
-- **Justification:** Implementing PostgreSQL directly inside an isolated GitHub submission repository introduces massive infrastructure roadblocks simply blocking recruiters from booting the evaluation environment rapidly. 
-- **The specific "Top 1%" Benefit:** By binding purely through generic SQLAlchemy abstractions and executing localized Database Pragma initialization (WAL modes), SQLite naturally mimics scalable multithreaded capabilities out-of-the-box supporting dashboard reporting `READs` while blocking `WRITE` starvation events. If production requirements scale beyond a local scope, altering connection credentials from `sqlite:///` to `postgresql+psycopg2://` immediately switches architectures seamlessly without altering any repository logic implementations.
+Analytics queries run `COUNT()`, `SUM()`, and `GROUP BY` across thousands of records. Computing these per-request at scale would exhaust database CPU.
 
-## 4. Role-Based Access Control Middleware
+- **Implementation**: Bounded in-memory Cache-Aside pattern.
+- **Flow**: Dashboard reads hit the cache dict. On miss, it calculates from DB and stores with a TTL. Any write operation in the record service invalidates the specific user's dashboard cache prefixes.
+- **Evolution**: The `CacheManager` exposes a standard `.get()`, `.set()`, and `.invalidate_prefix()` API. Migrating to Redis in a distributed environment requires modifying exactly one class under `app/core/cache.py`, with zero changes to business logic.
+- **Safety**: Bounded via LRU (maxsize) to prevent unbounded memory growth at 100k+ users.
 
-### Trade-Off Evaluated: Embedded Logical Checks vs Application Injected Middleware
+## 4. Idempotency Gateways
 
-- **The Decision:** **FastAPI Framework Parameter Injection `Depends()`**
-- **Justification:** Surrounding hundreds of endpoint functions with explicit evaluation matrices `if current_user.role not in ["admin"]: raise 403` breeds tremendous structural redundancy guaranteeing developer errors in large landscapes.
-- **The specific "Top 1%" Benefit:** Security configurations are natively bound directly alongside endpoint schema definitions preventing the request from processing through any body parsers if authorization fails. Example: `Depends(require_role("admin"))` clearly surfaces the requirement logic outwardly allowing swagger parsing tools to instantly comprehend what endpoints have authorization barriers inherently.
+Financial APIs cannot tolerate network-retry "double-spend" errors. The API handles network unpredictability using Idempotency Keys.
 
-## 5. Statistical Database Aggregation Execution 
+- **How it works**: Client sends an `Idempotency-Key` header with their POST payload.
+- **Protection Flow**:
+  1. Check fast in-memory cache for computed response.
+  2. Check persistent DB layer for survivability across restarts.
+  3. Attempt lock acquisition via 'pending' status row insertion.
+  4. Compare a SHA-256 fingerprint of `method + path + user_id + body` to reject modified retries.
+  5. Compute, persist 'completed' status, and return.
 
-### Trade-Off Evaluated: Executing Iteration Arrays Memory vs Leveraging Direct Database Functions 
+## 5. Security & RBAC Middleware
 
-- **The Decision:** **SQL Repository Component Aggregation**
-- **Justification:** A dashboard demanding "Total YTD Expenses" fetching raw historical bounds across tens of thousands of generic rows simply to parse amounts into an array and sum `amount['totals']` cascades Memory exhaustion immediately globally scaling badly.
-- **The specific "Top 1%" Benefit:** `record_repository.py` inherently utilizes direct connection bindings injecting raw `func.sum()` alongside localized `strftime` constraints shifting mathematical evaluation processes natively backwards downwards the pipeline forcing rapid C-compiled engines processing returns within generic milliseconds minimizing network transmission footprint boundaries inherently mitigating application bottlenecking scenarios.
+- **Role Base**: Roles (admin, analyst, viewer) map to granular permission arrays.
+- **IDOR Protection**: The system universally prevents Insecure Direct Object Reference by centralizing data scoping. Endpoints query records by injecting a `user_id` scope from `get_data_scope()`. If an unauthorized viewer requests an existing admin record by UUID, the repository naturally returns `None`, and the API produces a 404 Not Found rather than a 403 Forbidden, concealing the record's existence.

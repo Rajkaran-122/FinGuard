@@ -8,7 +8,7 @@ configures CORS, registers routers, and sets up exception handling.
 from contextlib import asynccontextmanager, suppress
 import asyncio
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
@@ -18,12 +18,16 @@ from slowapi.errors import RateLimitExceeded
 import os
 from alembic import command
 from alembic.config import Config
+from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from app.core.config import settings
 from app.core.database import engine, Base, SessionLocal
 from app.core.logging import StructuredLoggingMiddleware
 from app.core.rate_limit import limiter
 from app.core.idempotency import idempotency_manager
+from app.core.cache import cache_service
+from app.core.dependencies import get_db
 from app.routers import auth, users, records, summary
 
 @asynccontextmanager
@@ -69,11 +73,26 @@ app.include_router(records.router)
 app.include_router(summary.router)
 
 @app.get("/health", tags=["Utility"])
-def health_check():
-    """Health check endpoint to verify system status."""
+def health_check(db: Session = Depends(get_db)):
+    """
+    Health check endpoint to verify system status.
+
+    DESIGN: Actually pings the database rather than returning a
+    hardcoded 'connected' string. This allows load balancers and
+    monitoring systems to detect real outages.
+    """
+    db_status = "connected"
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception:
+        db_status = "disconnected"
+
+    cache_metrics = cache_service.snapshot_metrics()
+
     return {
-        "status": "ok",
-        "database": "connected",
+        "status": "ok" if db_status == "connected" else "degraded",
+        "database": db_status,
+        "cache": cache_metrics,
         "version": settings.APP_VERSION,
         "environment": settings.ENVIRONMENT,
     }

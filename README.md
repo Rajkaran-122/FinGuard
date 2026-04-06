@@ -175,3 +175,17 @@ All integration testing enforces strict checks against:
 - Data Scoping and Multi-tenant boundaries.
 - Cache Invalidation verification.
 - Idempotency validations for network retry paths.
+
+---
+
+## Error Catalog
+
+The API returns unified JSON error shapes. Known application error codes include:
+
+| Code                  | Description                               | HTTP Status |
+|-----------------------|-------------------------------------------|-------------|
+| `VALIDATION_FAILED`   | Input failed Pydantic or business rules   | 400 |
+| `AUTH_REQUIRED`       | Missing or invalid JWT token              | 401 |
+| `PERMISSION_DENIED`   | Role has insufficient privileges          | 403 |
+| `RECORD_NOT_FOUND`    | Resource missing or outside ownership     | 404 |
+| `CONCURRENT_REQUEST`  | Idempotency lock collision (try again)    | 409 |

@@ -9,13 +9,23 @@ from sqlalchemy.orm import Session
 from app.models.user import User, UserRole
 
 
+# Centralized role → permission mapping.
+# Adding a new role (e.g., Auditor) only requires a new entry here.
+ROLE_PERMISSIONS = {
+    "viewer": ["dashboard:view", "records:read"],
+    "analyst": ["dashboard:view", "records:read"],
+    "admin": ["dashboard:view", "records:read", "records:write", "users:manage"],
+}
+
+
 def create_user(db: Session, name: str, email: str, password_hash: str, role: str) -> User:
-    """Create a new user record."""
+    """Create a new user record with permissions derived from role."""
     user = User(
         name=name,
         email=email,
         password_hash=password_hash,
         role=UserRole(role),
+        permissions=ROLE_PERMISSIONS.get(role, ["dashboard:view", "records:read"]),
     )
     db.add(user)
     db.commit()

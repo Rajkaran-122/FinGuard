@@ -18,7 +18,6 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, case
 
 from app.models.record import FinancialRecord, RecordType
-from app.core.cache import cache_service
 
 
 def _active_records(db: Session, user_id: Optional[str] = None):
@@ -60,10 +59,6 @@ def create_record(
     db.add(record)
     db.commit()
     db.refresh(record)
-
-    # Invalidate dashboard cache aggressively on writes
-    cache_service.invalidate_prefix("dashboard_")
-
     return record
 
 
@@ -179,9 +174,6 @@ def update_record(db: Session, record: FinancialRecord, actor_id: str, **kwargs)
 
     db.commit()
     db.refresh(record)
-
-    cache_service.invalidate_prefix("dashboard_")
-
     return record
 
 
@@ -195,9 +187,6 @@ def soft_delete_record(db: Session, record: FinancialRecord, actor_id: str) -> F
 
     db.commit()
     db.refresh(record)
-
-    cache_service.invalidate_prefix("dashboard_")
-
     return record
 
 
@@ -292,10 +281,11 @@ def get_monthly_trends(
     COMPATIBILITY: Uses to_char() for PostgreSQL, strftime() for SQLite.
     Falls back gracefully in test environments using SQLite :memory:.
     """
-    # Use to_char for PostgreSQL, strftime for SQLite (test environment)
-    try:
+    # Dialect-aware date formatting: to_char for PostgreSQL, strftime for SQLite
+    dialect_name = db.bind.dialect.name if db.bind else "sqlite"
+    if dialect_name == "postgresql":
         period_expr = func.to_char(FinancialRecord.date, 'YYYY-MM')
-    except Exception:
+    else:
         period_expr = func.strftime("%Y-%m", FinancialRecord.date)
 
     query = db.query(

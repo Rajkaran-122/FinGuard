@@ -6,7 +6,7 @@ Dashboard aggregation logic with ownership-scoped data access.
 CACHE STRATEGY: Cache-Aside Pattern
   1. Check cache for pre-computed result
   2. On miss: compute from DB, store in cache with TTL
-  3. On write (create/update/delete): invalidate all dashboard_ keys
+  3. On write (create/update/delete): record_service invalidates dashboard_ keys
 
 WHY SYNC INVALIDATION (not async queue):
   - Assignment scope: Redis/RabbitMQ would add infrastructure complexity
@@ -23,15 +23,8 @@ from typing import Optional
 from sqlalchemy.orm import Session
 from app.repositories import record_repository
 from app.core.cache import cache_service
+from app.core.scope import get_data_scope
 from app.models.user import User
-
-
-def _get_scope(user: User) -> Optional[str]:
-    """Determine data scope based on user permissions."""
-    user_perms = user.permissions or []
-    if "records:write" in user_perms or "users:manage" in user_perms:
-        return None  # Admin: see all
-    return user.id  # Scoped: own data only
 
 
 def get_summary(
@@ -47,7 +40,7 @@ def get_summary(
     equal length. This tells stakeholders not just "how much" but
     "how fast" — the metric that drives financial decisions.
     """
-    scope = _get_scope(current_user)
+    scope = get_data_scope(current_user)
     cache_key = f"dashboard_summary_{scope}_{date_from}_{date_to}"
     cached = cache_service.get(cache_key)
     if cached:
@@ -88,7 +81,7 @@ def get_categories(
     date_from: Optional[date] = None, date_to: Optional[date] = None,
 ):
     """Get category-wise breakdown scoped by ownership."""
-    scope = _get_scope(current_user)
+    scope = get_data_scope(current_user)
     cache_key = f"dashboard_categories_{scope}_{date_from}_{date_to}"
     cached = cache_service.get(cache_key)
     if cached:
@@ -108,7 +101,7 @@ def get_trends(
     date_from: Optional[date] = None, date_to: Optional[date] = None,
 ):
     """Get monthly aggregated trend data scoped by ownership."""
-    scope = _get_scope(current_user)
+    scope = get_data_scope(current_user)
     cache_key = f"dashboard_trends_{scope}_{date_from}_{date_to}"
     cached = cache_service.get(cache_key)
     if cached:
@@ -122,7 +115,7 @@ def get_trends(
 
 def get_recent(db: Session, current_user: User, limit: int = 10):
     """Get recent financial activity scoped by ownership."""
-    scope = _get_scope(current_user)
+    scope = get_data_scope(current_user)
     records, total = record_repository.get_recent_records(db, limit, user_id=scope)
     return {
         "records": [

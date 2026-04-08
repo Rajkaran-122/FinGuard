@@ -33,9 +33,9 @@ TestingSessionLocal = async_sessionmaker(
 )
 
 
-@pytest_asyncio.fixture(scope="session", autouse=True)
+@pytest_asyncio.fixture(scope="function", autouse=True)
 async def db_schema():
-    """Create all tables in the in-memory database."""
+    """Create all tables in the in-memory database per test."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield

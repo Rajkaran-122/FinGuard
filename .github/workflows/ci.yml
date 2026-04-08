@@ -48,7 +48,7 @@ jobs:
 
     - name: Run Tests
       env:
-        DATABASE_URL: postgresql://finance_user:finance_password@localhost:5432/finance_db
+        DATABASE_URL: postgresql+asyncpg://finance_user:finance_password@localhost:5432/finance_db
         ENVIRONMENT: testing
       run: |
         pytest tests/ -v --cov=app

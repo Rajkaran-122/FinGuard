@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Refresh Token ORM Model
 =======================
@@ -5,9 +6,13 @@ Stores persistent session tokens for JWT rotation.
 """
 
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 from sqlalchemy import String, DateTime, ForeignKey, Boolean, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.models.user import User
 
 
 class RefreshToken(Base):
@@ -27,7 +32,7 @@ class RefreshToken(Base):
     )
 
     # Relationship
-    user: Mapped["User"] = relationship(back_populates="refresh_tokens")
+    user: Mapped[User] = relationship(back_populates="refresh_tokens")
 
     @property
     def is_expired(self) -> bool:

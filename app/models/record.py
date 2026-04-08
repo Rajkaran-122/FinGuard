@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Financial Record ORM Model
 ===========================
@@ -7,11 +8,14 @@ Represents income/expense transactions with soft-delete support using SQLAlchemy
 import enum
 from datetime import datetime, date, timezone
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from sqlalchemy import String, DateTime, Enum, ForeignKey, Index, DECIMAL, Boolean, Date, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.models.user import User
 
 
 class TransactionType(str, enum.Enum):
@@ -62,7 +66,7 @@ class FinancialRecord(Base):
     )
 
     # Relationships
-    user: Mapped["User"] = relationship(back_populates="financial_records")
+    user: Mapped[User] = relationship(back_populates="financial_records")
 
     # Composite indexes for high-performance aggregations
     __table_args__ = (

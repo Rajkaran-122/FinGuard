@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Audit Log ORM Model
 ====================
@@ -5,11 +6,14 @@ Captures system-wide events and data changes for security compliance.
 """
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from sqlalchemy import String, DateTime, ForeignKey, Text, JSON, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.models.user import User
 
 
 class AuditLog(Base):
@@ -35,7 +39,7 @@ class AuditLog(Base):
     )
 
     # Relationship
-    user: Mapped[Optional["User"]] = relationship(back_populates="audit_logs")
+    user: Mapped[Optional[User]] = relationship(back_populates="audit_logs")
 
     __table_args__ = (
         Index("idx_audit_module_action", "module", "action"),

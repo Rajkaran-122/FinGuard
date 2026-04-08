@@ -1,26 +1,28 @@
-"""Auth request/response schemas."""
+"""
+Authentication Pydantic Schemas
+==============================
+Models for tokens and login requests.
+"""
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict
+from app.schemas.user import UserResponse
 
 
-class RegisterRequest(BaseModel):
-    """Schema for user registration."""
-    name: str = Field(..., min_length=1, max_length=255, examples=["Rajkaran Yadav"])
-    email: EmailStr = Field(..., examples=["admin@finance.dev"])
-    password: str = Field(..., min_length=6, max_length=128, examples=["Admin@123"])
-    role: str = Field(default="viewer", pattern="^(viewer|analyst|admin)$", examples=["admin"])
+class Token(BaseModel):
+    """Access and Refresh token pair."""
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+
+
+class TokenData(BaseModel):
+    """Payload decoded from access token."""
+    sub: Optional[str] = None
+    email: Optional[str] = None
+    role: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
-    """Schema for user login."""
-    email: EmailStr = Field(..., examples=["admin@finance.dev"])
-    password: str = Field(..., examples=["Admin@123"])
-
-
-class TokenResponse(BaseModel):
-    """Schema for JWT token response."""
-    access_token: str
-    token_type: str = "bearer"
-    user_id: str
-    role: str
-    name: str
+    """Standard email/password login."""
+    email: str
+    password: str

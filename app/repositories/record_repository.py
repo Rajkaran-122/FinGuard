@@ -1,336 +1,130 @@
 """
-Record Repository
-==================
-All database queries for financial records including aggregations.
-All queries automatically exclude soft-deleted records.
-
-SECURITY: All read/write operations enforce ownership scoping.
-Admins bypass ownership checks; all other roles see only their own data.
-This prevents IDOR (Insecure Direct Object Reference) attacks where
-a user could guess another user's record UUID and access it.
+Financial Record Repository
+===========================
+Data access logic for FinancialRecord model with advanced filtering.
 """
 
-from datetime import date, datetime, timezone
-from typing import Optional, List, Tuple
+from typing import List, Optional, Tuple
 from decimal import Decimal
+from datetime import date
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, and_, update
+from app.models.record import FinancialRecord, TransactionType, Category
+from app.repositories.base import BaseRepository
 
-from sqlalchemy.orm import Session
-from sqlalchemy import func, case
 
-from app.models.record import FinancialRecord, RecordType
-
-
-def _active_records(db: Session, user_id: Optional[str] = None):
+class FinancialRecordRepository(BaseRepository[FinancialRecord]):
     """
-    Base query filtering out soft-deleted records.
-
-    SECURITY: When user_id is provided, results are scoped to only
-    records owned by that user. Admins pass user_id=None to bypass.
-    This is the single choke-point for ownership enforcement.
+    Handles persistence logic for financial records with complex filtering.
     """
-    query = db.query(FinancialRecord).filter(FinancialRecord.deleted_at.is_(None))
-    if user_id:
-        query = query.filter(FinancialRecord.created_by == user_id)
-    return query
 
+    def __init__(self):
+        super().__init__(FinancialRecord)
 
-def _apply_date_filters(query, date_from: Optional[date], date_to: Optional[date]):
-    """Reusable date range filter to avoid duplication across queries."""
-    if date_from:
-        query = query.filter(FinancialRecord.date >= date_from)
-    if date_to:
-        query = query.filter(FinancialRecord.date <= date_to)
-    return query
+    async def get_by_user_with_filters(
+        self,
+        db: AsyncSession,
+        user_id: int,
+        type: Optional[TransactionType] = None,
+        category: Optional[Category] = None,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        min_amount: Optional[Decimal] = None,
+        max_amount: Optional[Decimal] = None,
+        search: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 100
+    ) -> Tuple[List[FinancialRecord], int]:
+        """
+        Retrieves a filtered and paginated list of records for a specific user.
+        Also returns the total count for pagination.
+        """
+        filters = [
+            FinancialRecord.user_id == user_id,
+            FinancialRecord.is_deleted == False
+        ]
 
+        if type:
+            filters.append(FinancialRecord.type == type)
+        if category:
+            filters.append(FinancialRecord.category == category)
+        if start_date:
+            filters.append(FinancialRecord.date >= start_date)
+        if end_date:
+            filters.append(FinancialRecord.date <= end_date)
+        if min_amount:
+            filters.append(FinancialRecord.amount >= min_amount)
+        if max_amount:
+            filters.append(FinancialRecord.amount <= max_amount)
+        if search:
+            filters.append(FinancialRecord.description.ilike(f"%{search}%"))
 
-def create_record(
-    db: Session, amount: Decimal, record_type: str, category: str,
-    record_date: date, created_by: str, notes: Optional[str] = None
-) -> FinancialRecord:
-    """Create a new financial record."""
-    record = FinancialRecord(
-        amount=amount,
-        type=RecordType(record_type),
-        category=category,
-        date=record_date,
-        notes=notes,
-        created_by=created_by,
-    )
-    db.add(record)
-    db.commit()
-    db.refresh(record)
-    return record
+        # Build query
+        query = select(FinancialRecord).where(and_(*filters))
+        
+        # Get total count
+        count_stmt = select(func.count()).select_from(query.subquery())
+        total = await db.scalar(count_stmt) or 0
+        
+        # Get paginated results
+        query = query.order_by(FinancialRecord.date.desc()).offset(skip).limit(limit)
+        result = await db.execute(query)
+        records = list(result.scalars().all())
+        
+        return records, total
 
-
-def get_record_by_id(
-    db: Session, record_id: str, user_id: Optional[str] = None
-) -> Optional[FinancialRecord]:
-    """
-    Fetch a single active record by ID.
-
-    SECURITY: Ownership-scoped. Non-admin users must provide user_id,
-    which filters results to only their own records. If the record
-    exists but belongs to another user, returns None (appearing as 404)
-    to prevent information leakage about record existence.
-    """
-    return _active_records(db, user_id).filter(FinancialRecord.id == record_id).first()
-
-
-def _log_audit(db: Session, record_id: str, action: str, actor_id: str, old_dict: dict, new_dict: dict):
-    from app.models.record import FinancialRecordAudit
-    db.add(FinancialRecordAudit(
-        record_id=record_id,
-        action_type=action,
-        actor_id=actor_id,
-        old_state=old_dict,
-        new_state=new_dict
-    ))
-
-def get_records(
-    db: Session,
-    record_type: Optional[str] = None,
-    category: Optional[str] = None,
-    date_from: Optional[date] = None,
-    date_to: Optional[date] = None,
-    search: Optional[str] = None,
-    cursor: Optional[str] = None,
-    page: int = 1,
-    limit: int = 50,
-    user_id: Optional[str] = None,
-) -> Tuple[List[FinancialRecord], int, Optional[str]]:
-    """
-    Return records, total count, and next cursor.
-
-    SCALABILITY NOTE: At 1M+ records, the COUNT(*) becomes expensive.
-    Production mitigation: use estimated counts from pg_stat_user_tables
-    for display, or cache the total count separately with short TTL.
-    The cursor-based pagination itself scales well since it avoids OFFSET.
-    """
-    query = _active_records(db, user_id)
-
-    if record_type:
-        query = query.filter(FinancialRecord.type == RecordType(record_type))
-    if category:
-        query = query.filter(FinancialRecord.category == category)
-    query = _apply_date_filters(query, date_from, date_to)
-    if search:
-        search_pattern = f"%{search}%"
-        query = query.filter(
-            (FinancialRecord.notes.ilike(search_pattern)) |
-            (FinancialRecord.category.ilike(search_pattern))
+    async def soft_delete(self, db: AsyncSession, id: int) -> bool:
+        """Marks a record as deleted without removing from DB."""
+        result = await db.execute(
+            update(FinancialRecord)
+            .where(FinancialRecord.id == id)
+            .values(is_deleted=True)
         )
+        await db.commit()
+        return result.rowcount > 0
 
-    if cursor:
-        try:
-            cursor_dt = datetime.fromisoformat(cursor.replace("Z", "+00:00"))
-            query = query.filter(FinancialRecord.created_at < cursor_dt)
-        except ValueError:
-            pass
+    async def get_total_by_type(
+        self, 
+        db: AsyncSession, 
+        user_id: int, 
+        type: TransactionType,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None
+    ) -> Decimal:
+        """Aggregates total amount for a specific type and time range."""
+        filters = [
+            FinancialRecord.user_id == user_id,
+            FinancialRecord.type == type,
+            FinancialRecord.is_deleted == False
+        ]
+        if start_date:
+            filters.append(FinancialRecord.date >= start_date)
+        if end_date:
+            filters.append(FinancialRecord.date <= end_date)
+            
+        stmt = select(func.sum(FinancialRecord.amount)).where(and_(*filters))
+        result = await db.execute(stmt)
+        return result.scalar() or Decimal("0.00")
 
-    total = query.count()
-    records = (
-        query.order_by(FinancialRecord.created_at.desc())
-        .limit(limit)
-        .all()
-    ) if cursor else (
-        query.order_by(FinancialRecord.date.desc(), FinancialRecord.created_at.desc())
-        .offset((page - 1) * limit).limit(limit).all()
-    )
-
-    next_cursor = records[-1].created_at.isoformat() if len(records) == limit else None
-    return records, total, next_cursor
-
-
-def _to_serializable(value):
-    """Normalize ORM values into JSON-serializable primitives."""
-    if isinstance(value, Decimal):
-        return float(value)
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, date):
-        return value.isoformat()
-    if hasattr(value, "value"):
-        return value.value
-    return value
-
-
-def _snapshot(record: FinancialRecord) -> dict:
-    """Capture current record state for audit trail."""
-    return {c.name: _to_serializable(getattr(record, c.name)) for c in record.__table__.columns}
-
-
-def update_record(db: Session, record: FinancialRecord, actor_id: str, **kwargs) -> FinancialRecord:
-    """Update record with Immutable Audit Logs."""
-    old_state = _snapshot(record)
-    for key, value in kwargs.items():
-        if value is not None:
-            if key == "type":
-                setattr(record, key, RecordType(value))
-            else:
-                setattr(record, key, value)
-
-    new_state = _snapshot(record)
-    _log_audit(db, record.id, "UPDATE", actor_id, old_state, new_state)
-
-    db.commit()
-    db.refresh(record)
-    return record
+    async def get_category_breakdown(
+        self, db: AsyncSession, user_id: int, type: Optional[TransactionType] = None
+    ) -> List[dict]:
+        """Returns spend/income breakdown grouped by category."""
+        filters = [FinancialRecord.user_id == user_id, FinancialRecord.is_deleted == False]
+        if type:
+            filters.append(FinancialRecord.type == type)
+            
+        stmt = (
+            select(
+                FinancialRecord.category,
+                func.sum(FinancialRecord.amount).label("total"),
+                func.count(FinancialRecord.id).label("count")
+            )
+            .where(and_(*filters))
+            .group_by(FinancialRecord.category)
+        )
+        result = await db.execute(stmt)
+        return [{"category": r.category, "total": r.total, "count": r.count} for r in result.all()]
 
 
-def soft_delete_record(db: Session, record: FinancialRecord, actor_id: str) -> FinancialRecord:
-    """Soft-delete triggers an Immutable Audit trail."""
-    old_state = _snapshot(record)
-    record.deleted_at = datetime.now(timezone.utc)
-    new_state = _snapshot(record)
-
-    _log_audit(db, record.id, "SOFT_DELETE", actor_id, old_state, new_state)
-
-    db.commit()
-    db.refresh(record)
-    return record
-
-
-# --- Aggregation Queries ---
-# PERFORMANCE NOTE: All aggregation queries use SQL-level SUM/COUNT/GROUP BY
-# instead of loading records into Python memory. At 1M records, this is the
-# difference between a 50ms DB query and a 5-second Python loop with 500MB RAM.
-
-def get_summary_totals(
-    db: Session, date_from: Optional[date] = None, date_to: Optional[date] = None,
-    user_id: Optional[str] = None,
-) -> dict:
-    """
-    Calculate total income, total expenses, and net balance.
-
-    SECURITY: Scoped by user_id for non-admin users.
-    PERFORMANCE: Single query with conditional SUM — O(1) DB round trips.
-    """
-    query = db.query(
-        func.coalesce(
-            func.sum(case((FinancialRecord.type == RecordType.INCOME, FinancialRecord.amount))),
-            0
-        ).label("total_income"),
-        func.coalesce(
-            func.sum(case((FinancialRecord.type == RecordType.EXPENSE, FinancialRecord.amount))),
-            0
-        ).label("total_expenses"),
-        func.count(FinancialRecord.id).label("record_count"),
-    ).filter(FinancialRecord.deleted_at.is_(None))
-
-    if user_id:
-        query = query.filter(FinancialRecord.created_by == user_id)
-    query = _apply_date_filters(query, date_from, date_to)
-
-    result = query.first()
-    total_income = float(result.total_income or 0)
-    total_expenses = float(result.total_expenses or 0)
-
-    return {
-        "total_income": total_income,
-        "total_expenses": total_expenses,
-        "net_balance": total_income - total_expenses,
-        "record_count": result.record_count,
-    }
-
-
-def get_category_breakdown(
-    db: Session, date_from: Optional[date] = None, date_to: Optional[date] = None,
-    user_id: Optional[str] = None,
-) -> List[dict]:
-    """
-    Get category-wise totals grouped by type.
-
-    SECURITY: Scoped by user_id for non-admin users.
-    SCALABILITY: GROUP BY is indexed (idx_records_category + idx_records_type).
-    """
-    query = db.query(
-        FinancialRecord.category,
-        FinancialRecord.type,
-        func.sum(FinancialRecord.amount).label("total"),
-        func.count(FinancialRecord.id).label("count"),
-    ).filter(
-        FinancialRecord.deleted_at.is_(None)
-    ).group_by(
-        FinancialRecord.category, FinancialRecord.type
-    )
-
-    if user_id:
-        query = query.filter(FinancialRecord.created_by == user_id)
-    query = _apply_date_filters(query, date_from, date_to)
-
-    results = query.all()
-    return [
-        {
-            "category": r.category,
-            "type": r.type.value if hasattr(r.type, 'value') else r.type,
-            "total": float(r.total),
-            "count": r.count,
-        }
-        for r in results
-    ]
-
-
-def get_monthly_trends(
-    db: Session, date_from: Optional[date] = None, date_to: Optional[date] = None,
-    user_id: Optional[str] = None,
-) -> List[dict]:
-    """
-    Get monthly aggregated trends.
-
-    SECURITY: Scoped by user_id for non-admin users.
-    COMPATIBILITY: Uses to_char() for PostgreSQL, strftime() for SQLite.
-    Falls back gracefully in test environments using SQLite :memory:.
-    """
-    # Dialect-aware date formatting: to_char for PostgreSQL, strftime for SQLite
-    dialect_name = db.bind.dialect.name if db.bind else "sqlite"
-    if dialect_name == "postgresql":
-        period_expr = func.to_char(FinancialRecord.date, 'YYYY-MM')
-    else:
-        period_expr = func.strftime("%Y-%m", FinancialRecord.date)
-
-    query = db.query(
-        period_expr.label("period"),
-        func.coalesce(
-            func.sum(case((FinancialRecord.type == RecordType.INCOME, FinancialRecord.amount))),
-            0
-        ).label("income"),
-        func.coalesce(
-            func.sum(case((FinancialRecord.type == RecordType.EXPENSE, FinancialRecord.amount))),
-            0
-        ).label("expense"),
-    ).filter(
-        FinancialRecord.deleted_at.is_(None)
-    ).group_by(period_expr).order_by(period_expr)
-
-    if user_id:
-        query = query.filter(FinancialRecord.created_by == user_id)
-    query = _apply_date_filters(query, date_from, date_to)
-
-    results = query.all()
-    return [
-        {
-            "period": r.period,
-            "income": float(r.income),
-            "expense": float(r.expense),
-            "net": float(r.income) - float(r.expense),
-        }
-        for r in results
-    ]
-
-
-def get_recent_records(
-    db: Session, limit: int = 10, user_id: Optional[str] = None,
-) -> Tuple[List[FinancialRecord], int]:
-    """
-    Get the N most recent financial records.
-
-    SECURITY: Scoped by user_id for non-admin users.
-    """
-    query = _active_records(db, user_id)
-    total = query.count()
-    records = (
-        query.order_by(FinancialRecord.created_at.desc())
-        .limit(limit)
-        .all()
-    )
-    return records, total
+record_repository = FinancialRecordRepository()

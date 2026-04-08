@@ -1,7 +1,8 @@
 """
 Security Utilities
 ==================
-JWT token creation/validation and bcrypt password hashing.
+Enterprise-grade security manager handling password hashing and JWT lifecycle.
+Supports Access and Refresh token pairs.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -9,56 +10,66 @@ from typing import Optional, Dict, Any
 
 from jose import jwt, JWTError
 from passlib.context import CryptContext
+from fastapi import HTTPException, status
 
 from app.core.config import settings
-
-# --- Password Hashing ---
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
-def hash_password(plain_password: str) -> str:
-    """Hash a plain-text password using bcrypt."""
-    return pwd_context.hash(plain_password)
+class SecurityManager:
+    """ Manages authentication and authorization tokens. """
 
+    def __init__(self):
+        self.pwd_context = pwd_context
+        self.algorithm = settings.JWT_ALGORITHM
+        self.access_secret = settings.JWT_SECRET
+        self.refresh_secret = settings.JWT_REFRESH_SECRET
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a plain-text password against a bcrypt hash."""
-    return pwd_context.verify(plain_password, hashed_password)
+    def verify_password(self, plain_password: str, hashed_password: str) -> bool:
+        """Verify a plain-text password against its hash."""
+        return self.pwd_context.verify(plain_password, hashed_password)
 
+    def get_password_hash(self, password: str) -> str:
+        """Create a bcrypt hash of a password."""
+        return self.pwd_context.hash(password)
 
-# --- JWT Token Management ---
-
-def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
-    """
-    Create a JWT access token.
-    
-    Args:
-        data: Payload data (must include 'sub' for user identifier)
-        expires_delta: Custom expiry duration (defaults to settings.JWT_EXPIRY_HOURS)
-    
-    Returns:
-        Encoded JWT string
-    """
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (
-        expires_delta or timedelta(hours=settings.JWT_EXPIRY_HOURS)
-    )
-    to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
-    return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
-
-
-def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
-    """
-    Decode and validate a JWT access token.
-    
-    Returns:
-        Decoded payload dict, or None if token is invalid/expired
-    """
-    try:
-        payload = jwt.decode(
-            token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
+    def create_access_token(self, data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
+        """Generate a short-lived access JWT."""
+        to_encode = data.copy()
+        expire = datetime.now(timezone.utc) + (
+            expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         )
-        return payload
-    except JWTError:
-        return None
+        to_encode.update({"exp": expire, "type": "access", "iat": datetime.now(timezone.utc)})
+        return jwt.encode(to_encode, self.access_secret, algorithm=self.algorithm)
+
+    def create_refresh_token(self, data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
+        """Generate a long-lived refresh JWT."""
+        to_encode = data.copy()
+        expire = datetime.now(timezone.utc) + (
+            expires_delta or timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+        )
+        to_encode.update({"exp": expire, "type": "refresh", "iat": datetime.now(timezone.utc)})
+        return jwt.encode(to_encode, self.refresh_secret, algorithm=self.algorithm)
+
+    def verify_token(self, token: str, token_type: str = "access") -> Dict[str, Any]:
+        """
+        Validate and decode a JWT.
+        Raises 401 if invalid or wrong type.
+        """
+        try:
+            secret = self.access_secret if token_type == "access" else self.refresh_secret
+            payload = jwt.decode(token, secret, algorithms=[self.algorithm])
+            if payload.get("type") != token_type:
+                raise JWTError("Invalid token type claim")
+            return payload
+        except JWTError as e:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Could not validate credentials: {str(e)}",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+
+# Singleton instance
+security_manager = SecurityManager()

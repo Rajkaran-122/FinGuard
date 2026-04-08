@@ -1,10 +1,28 @@
-from typing import Generic, TypeVar, Optional
-from pydantic import BaseModel
+"""
+Common Pydantic Schemas
+=======================
+Standardized response wrappers and pagination models.
+"""
 
-DataT = TypeVar('DataT')
+from typing import Generic, TypeVar, Optional, List, Any
+from pydantic import BaseModel, ConfigDict
 
-class ResponseWrapper(BaseModel, Generic[DataT]):
-    """Standardized API response wrapper ensuring uniform payload structure."""
-    status: str = "success"
-    message: Optional[str] = None
-    data: DataT
+T = TypeVar("T")
+
+
+class ResponseWrapper(BaseModel, Generic[T]):
+    """Standard API response structure."""
+    success: bool = True
+    message: Optional[str] = "Operation successful"
+    data: Optional[T] = None
+
+
+class PaginatedResponse(BaseModel, Generic[T]):
+    """Standard paginated output."""
+    items: List[T]
+    total: int
+    page: int
+    size: int
+    pages: int
+
+    model_config = ConfigDict(from_attributes=True)

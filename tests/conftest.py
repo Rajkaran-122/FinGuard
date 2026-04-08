@@ -1,107 +1,102 @@
 """
-Pytest configuration and shared fixtures for tests.
-Uses in-memory SQLite database for fast, isolated testing.
+Pytest configuration and shared async fixtures for tests.
+Uses in-memory aiosqlite database for fast, isolated, async testing.
 """
+
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+import pytest_asyncio
+from typing import AsyncGenerator
+from httpx import AsyncClient, ASGITransport
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.main import app
-from app.core.database import Base
-from app.core.dependencies import get_db
-from app.models.user import User, UserRole
-from app.core.security import hash_password, create_access_token
+from app.core.database import Base, get_db
+from app.models.user import User, UserRole, UserStatus
+from app.core.security import security_manager
 
-# In-Memory SQLite configuration
-SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
+# --- Async Test Database Configuration ---
+TEST_SQLALCHEMY_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
+engine = create_async_engine(
+    TEST_SQLALCHEMY_DATABASE_URL,
     connect_args={"check_same_thread": False},
     poolclass=StaticPool,
 )
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-@pytest.fixture(scope="session")
-def db_engine():
+TestingSessionLocal = async_sessionmaker(
+    bind=engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autocommit=False,
+    autoflush=False,
+)
+
+
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def db_schema():
     """Create all tables in the in-memory database."""
-    Base.metadata.create_all(bind=engine)
-    yield engine
-    Base.metadata.drop_all(bind=engine)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
 
-@pytest.fixture(scope="function")
-def db_session(db_engine):
+
+@pytest_asyncio.fixture(scope="function")
+async def db_session() -> AsyncGenerator[AsyncSession, None]:
     """Provide a transactional scoped session for tests."""
-    connection = db_engine.connect()
-    transaction = connection.begin()
-    session = TestingSessionLocal(bind=connection)
-    yield session
-    session.close()
-    transaction.rollback()
-    connection.close()
+    async with TestingSessionLocal() as session:
+        yield session
+        await session.rollback()
 
-@pytest.fixture(scope="function")
-def client(db_session):
-    """Test client overriding the get_db dependency."""
-    def override_get_db():
-        try:
-            yield db_session
-        finally:
-            pass
+
+@pytest_asyncio.fixture(scope="function")
+async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
+    """Async test client overriding the get_db dependency."""
+    
+    async def override_get_db():
+        yield db_session
+
     app.dependency_overrides[get_db] = override_get_db
-    yield TestClient(app)
+    
+    async with AsyncClient(
+        transport=ASGITransport(app=app), 
+        base_url="http://test"
+    ) as ac:
+        yield ac
+    
     app.dependency_overrides.clear()
 
-@pytest.fixture(scope="function")
-def admin_user(db_session):
-    """Creates a mock admin user in DB with full permissions."""
+
+@pytest_asyncio.fixture(scope="function")
+async def admin_user(db_session: AsyncSession) -> User:
+    """Creates a mock admin user in DB."""
     user = User(
-        name="Admin Test",
+        first_name="Admin",
+        last_name="Test",
         email="admin_test@finance.dev",
-        password_hash=hash_password("Admin@123"),
+        hashed_password=security_manager.get_password_hash("Admin@123"),
         role=UserRole.ADMIN,
-        permissions=["dashboard:view", "records:read", "records:write", "users:manage"]
+        status=UserStatus.ACTIVE
     )
     db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
+    await db_session.commit()
+    await db_session.refresh(user)
     return user
 
-@pytest.fixture(scope="function")
-def admin_token(admin_user):
-    """Returns JWT token for the admin user."""
-    return create_access_token({"sub": admin_user.id, "role": admin_user.role.value})
 
-@pytest.fixture(scope="function")
-def admin_headers(admin_token):
+@pytest_asyncio.fixture(scope="function")
+async def admin_token(admin_user: User) -> str:
+    """Returns JWT access token for the admin user."""
+    return security_manager.create_access_token({
+        "sub": str(admin_user.id), 
+        "email": admin_user.email,
+        "role": admin_user.role.value
+    })
+
+
+@pytest_asyncio.fixture(scope="function")
+def admin_headers(admin_token: str):
     """Returns Auth headers block for test client."""
     return {"Authorization": f"Bearer {admin_token}"}
-
-# --- IDOR Test Fixtures ---
-
-@pytest.fixture(scope="function")
-def viewer_user(db_session):
-    """Creates a restricted viewer user with read-only permissions."""
-    user = User(
-        name="Viewer Test",
-        email="viewer_test@finance.dev",
-        password_hash=hash_password("Viewer@123"),
-        role=UserRole.VIEWER,
-        permissions=["dashboard:view", "records:read"]
-    )
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
-    return user
-
-@pytest.fixture(scope="function")
-def viewer_token(viewer_user):
-    """Returns JWT token for the viewer user."""
-    return create_access_token({"sub": viewer_user.id, "role": viewer_user.role.value})
-
-@pytest.fixture(scope="function")
-def viewer_headers(viewer_token):
-    """Returns Auth headers for viewer user."""
-    return {"Authorization": f"Bearer {viewer_token}"}

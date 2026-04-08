@@ -1,34 +1,35 @@
 services:
   api:
     build: .
-    container_name: finguard-api
-    restart: always
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://finance_user:finance_password@db:5432/finance_db
-      ENVIRONMENT: development
-      APP_TITLE: FinGuard API
-      APP_VERSION: 1.0.0
-      JWT_SECRET: your-super-secret-key-change-this-in-production-min-32-chars
-      JWT_ALGORITHM: HS256
-      JWT_EXPIRY_HOURS: 24
-      CORS_ORIGINS: http://localhost:3000,http://localhost:8080
+      - DATABASE_URL=postgresql+asyncpg://finguard_user:finguard_pass@db:5432/finguard_db
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=finguard-access-secret-rajkaran-yadav-2025
+      - JWT_REFRESH_SECRET=finguard-refresh-secret-rajkaran-yadav-2025
+      - ENVIRONMENT=development
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
 
   db:
     image: postgres:15-alpine
-    container_name: finguard-postgres
-    restart: always
     environment:
-      POSTGRES_USER: finance_user
-      POSTGRES_PASSWORD: finance_password
-      POSTGRES_DB: finance_db
+      - POSTGRES_USER=finguard_user
+      - POSTGRES_PASSWORD=finguard_pass
+      - POSTGRES_DB=finguard_db
     ports:
       - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finguard_user -d finguard_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-volumes:
-  postgres_data:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"

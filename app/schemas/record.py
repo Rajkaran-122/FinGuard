@@ -1,57 +1,45 @@
-"""Financial record request/response schemas."""
+"""
+Financial Record Pydantic Schemas
+=================================
+Validation and response models for financial transactions.
+"""
 
-import datetime
-from typing import Optional, List
+from datetime import datetime, date
 from decimal import Decimal
-from pydantic import BaseModel, Field
+from typing import Optional
+from pydantic import BaseModel, Field, ConfigDict
+
+from app.models.record import TransactionType, Category
 
 
-class RecordCreate(BaseModel):
-    """Schema for creating a financial record."""
-    amount: Decimal = Field(..., gt=0, decimal_places=2, examples=[5000.00])
-    type: str = Field(..., pattern="^(income|expense)$", examples=["income"])
-    category: str = Field(..., min_length=1, max_length=100, examples=["Salary"])
-    date: datetime.date = Field(..., examples=["2025-01-15"])
-    notes: Optional[str] = Field(None, max_length=500, examples=["Monthly salary"])
-
-
-class RecordUpdate(BaseModel):
-    """Schema for full update of a financial record."""
+class FinancialRecordBase(BaseModel):
+    """Common record attributes."""
     amount: Decimal = Field(..., gt=0, decimal_places=2)
-    type: str = Field(..., pattern="^(income|expense)$")
-    category: str = Field(..., min_length=1, max_length=100)
-    date: datetime.date
-    notes: Optional[str] = Field(None, max_length=500)
+    type: TransactionType
+    category: Category
+    date: date
+    description: Optional[str] = Field(None, max_length=1000)
 
 
-class RecordPartialUpdate(BaseModel):
-    """Schema for partial update — all fields optional."""
+class FinancialRecordCreate(FinancialRecordBase):
+    """Schema for creating a new record."""
+    pass
+
+
+class FinancialRecordUpdate(BaseModel):
+    """Schema for updating an existing record."""
     amount: Optional[Decimal] = Field(None, gt=0, decimal_places=2)
-    type: Optional[str] = Field(None, pattern="^(income|expense)$")
-    category: Optional[str] = Field(None, min_length=1, max_length=100)
-    date: Optional[datetime.date] = None
-    notes: Optional[str] = Field(None, max_length=500)
+    type: Optional[TransactionType] = None
+    category: Optional[Category] = None
+    date: Optional[date] = None
+    description: Optional[str] = Field(None, max_length=1000)
 
 
-class RecordResponse(BaseModel):
-    """Schema for financial record response."""
-    id: str
-    amount: float
-    type: str
-    category: str
-    date: datetime.date
-    notes: Optional[str]
-    created_by: str
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
+class FinancialRecordResponse(FinancialRecordBase):
+    """Schema for returning record data."""
+    id: int
+    user_id: int
+    created_at: datetime
+    updated_at: Optional[datetime]
 
-    model_config = {"from_attributes": True}
-
-
-class RecordListResponse(BaseModel):
-    """Paginated record list response."""
-    records: List[RecordResponse]
-    total: int
-    page: int = 1
-    limit: int = 50
-    next_cursor: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)

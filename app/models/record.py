@@ -1,82 +1,74 @@
 """
 Financial Record ORM Model
 ===========================
-Represents income/expense transactions with soft-delete support.
+Represents income/expense transactions with soft-delete support using SQLAlchemy 2.0 style.
 """
 
-import uuid
 import enum
-from datetime import datetime, timezone
+from datetime import datetime, date, timezone
+from decimal import Decimal
+from typing import Optional
 
-from sqlalchemy import (
-    Column, String, Numeric, Date, Text, DateTime,
-    Enum, ForeignKey, Index, JSON
-)
+from sqlalchemy import String, DateTime, Enum, ForeignKey, Index, DECIMAL, Boolean, Date, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 
-class RecordType(str, enum.Enum):
+class TransactionType(str, enum.Enum):
     """Financial record type."""
-    INCOME = "income"
-    EXPENSE = "expense"
+    INCOME = "INCOME"
+    EXPENSE = "EXPENSE"
+
+
+class Category(str, enum.Enum):
+    """Common financial categories."""
+    SALARY = "SALARY"
+    BUSINESS = "BUSINESS"
+    INVESTMENT = "INVESTMENT"
+    FOOD = "FOOD"
+    TRANSPORT = "TRANSPORT"
+    UTILITIES = "UTILITIES"
+    ENTERTAINMENT = "ENTERTAINMENT"
+    HEALTHCARE = "HEALTHCARE"
+    EDUCATION = "EDUCATION"
+    SHOPPING = "SHOPPING"
+    OTHER = "OTHER"
 
 
 class FinancialRecord(Base):
     __tablename__ = "financial_records"
 
-    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    amount = Column(Numeric(12, 2), nullable=False)
-    type = Column(Enum(RecordType), nullable=False)
-    category = Column(String(100), nullable=False)
-    date = Column(Date, nullable=False)
-    notes = Column(Text, nullable=True)
-    created_by = Column(
-        String(36),
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    deleted_at = Column(DateTime(timezone=True), nullable=True, default=None)
-    created_at = Column(
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    amount: Mapped[Decimal] = mapped_column(DECIMAL(15, 2), nullable=False)
+    type: Mapped[TransactionType] = mapped_column(Enum(TransactionType), nullable=False, index=True)
+    category: Mapped[Category] = mapped_column(Enum(Category), nullable=False, index=True)
+    date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
-    updated_at = Column(
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
 
-    # Indexes for common query patterns
-    # PERFORMANCE: Composite index covers the most frequent aggregation queries
-    # (GROUP BY type, category WHERE date BETWEEN x AND y AND created_by = z)
+    # Relationships
+    user: Mapped["User"] = relationship(back_populates="financial_records")
+
+    # Composite indexes for high-performance aggregations
     __table_args__ = (
-        Index("idx_records_date", "date"),
-        Index("idx_records_type", "type"),
-        Index("idx_records_category", "category"),
-        Index("idx_records_created_by", "created_by"),
-        Index("idx_records_created_by_date", "created_by", "date"),  # Ownership + time range queries
-        Index("idx_records_category_type", "category", "type"),
-        Index("idx_records_created_at", "created_at"),
+        Index("idx_records_user_date", "user_id", "date"),
+        Index("idx_records_user_type_category", "user_id", "type", "category"),
     )
 
     def __repr__(self):
-        return f"<FinancialRecord {self.type.value} {self.amount} {self.category}>"
-
-class FinancialRecordAudit(Base):
-    """Immutable audit log capturing exact changes preventing historical data loss."""
-    __tablename__ = "financial_record_audits"
-
-    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    record_id = Column(String(36), ForeignKey("financial_records.id", ondelete="CASCADE"), nullable=False)
-    action_type = Column(String(50), nullable=False) 
-    actor_id = Column(String(36), nullable=True)
-    old_state = Column(JSON().with_variant(Text, "sqlite"), nullable=True)
-    new_state = Column(JSON().with_variant(Text, "sqlite"), nullable=True)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
-
-    __table_args__ = (
-        Index("idx_audit_record_id", "record_id"),
-        Index("idx_audit_actor_id", "actor_id"),
-    )
+        return f"<FinancialRecord {self.type} {self.amount} {self.category}>"

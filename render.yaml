@@ -9,10 +9,15 @@ services:
         fromDatabase:
           name: finguard-db
           property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: finguard-cache
+          property: connectionString
       - key: JWT_SECRET
         generateValue: true
-      - key: JWT_EXPIRY_HOURS
-        value: 24
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
       - key: ENVIRONMENT
         value: production
       - key: CORS_ORIGINS
@@ -23,3 +28,8 @@ services:
     plan: free
     databaseName: finguard
     user: finguard_admin
+
+  - type: redis
+    name: finguard-cache
+    plan: free
+    ipAllowList: [] # Internal only

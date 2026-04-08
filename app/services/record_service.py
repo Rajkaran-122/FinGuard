@@ -1,120 +1,86 @@
 """
-Record Service
-===============
-Financial record business rules with ownership-scoped data access.
-
-SECURITY DESIGN: Every operation receives the current_user object.
-The service determines the effective user_id scope via the shared
-`get_data_scope()` utility:
-  - Admin users (with 'records:write' permission) -> user_id=None (see all)
-  - All other users -> user_id=current_user.id (see only own data)
-
-CACHE INVALIDATION: All cache invalidation happens HERE in the service
-layer — not in the repository. The repository is a pure data-access
-layer that should not be aware of caching concerns.
+Financial Record Service
+========================
+Business logic for managing financial transactions.
+Handles ownership validation and cache invalidation on mutation.
 """
 
-from datetime import date
-from typing import Optional
+from typing import List, Optional, Tuple
 from decimal import Decimal
-
+from datetime import date
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.repositories import record_repository
-from app.core.cache import cache_service
-from app.core.scope import get_data_scope
-from app.models.user import User
-
-
-def create_record(
-    db: Session, amount: Decimal, record_type: str, category: str,
-    record_date: date, created_by: str, notes: Optional[str] = None
-):
-    """Create a new financial record triggering Cache Invalidation event hooks."""
-    record = record_repository.create_record(
-        db, amount, record_type, category, record_date, created_by, notes
-    )
-    # Scope invalidation to the specific user to avoid thundering herd
-    cache_service.invalidate_prefix(f"dashboard_summary_{created_by}")
-    cache_service.invalidate_prefix(f"dashboard_categories_{created_by}")
-    cache_service.invalidate_prefix(f"dashboard_trends_{created_by}")
-    # Also invalidate admin-scoped (None) caches
-    cache_service.invalidate_prefix("dashboard_summary_None")
-    cache_service.invalidate_prefix("dashboard_categories_None")
-    cache_service.invalidate_prefix("dashboard_trends_None")
-    return record
+from app.models.record import FinancialRecord, TransactionType, Category
+from app.models.user import User, UserRole
+from app.repositories.record_repository import record_repository
+from app.services.cache_service import cache_service
+from app.core.logging import logger
 
 
-def list_records(
-    db: Session, current_user: User,
-    record_type: Optional[str] = None, category: Optional[str] = None,
-    date_from: Optional[date] = None, date_to: Optional[date] = None,
-    search: Optional[str] = None, cursor: Optional[str] = None,
-    page: int = 1, limit: int = 50,
-):
-    """List records scoped to user ownership."""
-    scope = get_data_scope(current_user)
-    records, total, next_cursor = record_repository.get_records(
-        db, record_type, category, date_from, date_to, search, cursor, page, limit,
-        user_id=scope,
-    )
-    return {"records": records, "total": total, "next_cursor": next_cursor, "page": page, "limit": limit}
-
-
-def get_record(db: Session, record_id: str, current_user: User):
+class RecordService:
     """
-    Get a single record by ID with ownership enforcement.
-
-    SECURITY: Returns 404 (not 403) when record exists but belongs to
-    another user. This prevents attackers from confirming record existence.
+    Orchestrates financial data operations with security checks.
     """
-    scope = get_data_scope(current_user)
-    record = record_repository.get_record_by_id(db, record_id, user_id=scope)
-    if not record:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"message": "Record not found", "code": "RECORD_NOT_FOUND"},
-        )
-    return record
 
-
-def update_record(db: Session, record_id: str, current_user: User, **kwargs):
-    """Full or partial update with ownership check and Cache Invalidation."""
-    scope = get_data_scope(current_user)
-    record = record_repository.get_record_by_id(db, record_id, user_id=scope)
-    if not record:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"message": "Record not found", "code": "RECORD_NOT_FOUND"},
+    async def get_records(
+        self,
+        db: AsyncSession,
+        user_id: int,
+        skip: int = 0,
+        limit: int = 100,
+        type: Optional[TransactionType] = None,
+        category: Optional[Category] = None,
+        **filters
+    ) -> Tuple[List[FinancialRecord], int]:
+        """Fetch filtered records for the current user."""
+        return await record_repository.get_by_user_with_filters(
+            db, user_id, type, category, skip=skip, limit=limit, **filters
         )
 
-    updated = record_repository.update_record(db, record, actor_id=current_user.id, **kwargs)
-    cache_service.invalidate_prefix(f"dashboard_summary_{record.created_by}")
-    cache_service.invalidate_prefix(f"dashboard_categories_{record.created_by}")
-    cache_service.invalidate_prefix(f"dashboard_trends_{record.created_by}")
-    cache_service.invalidate_prefix("dashboard_summary_None")
-    cache_service.invalidate_prefix("dashboard_categories_None")
-    cache_service.invalidate_prefix("dashboard_trends_None")
-    return updated
+    async def create_record(self, db: AsyncSession, user_id: int, record_data: dict) -> FinancialRecord:
+        """Create a new record and invalidate dashboard cache."""
+        record_data["user_id"] = user_id
+        record = await record_repository.create(db, record_data)
+        
+        # Invalidate dashboard cache immediately on mutation
+        await cache_service.delete(f"dashboard:summary:{user_id}")
+        
+        logger.info(f"record: created record_id={record.id} user_id={user_id}")
+        return record
+
+    async def update_record(self, db: AsyncSession, record_id: int, current_user: User, update_data: dict) -> FinancialRecord:
+        """Update a record if existing and owned by user (or Admin)."""
+        record = await record_repository.get_by_id(db, record_id)
+        if not record or record.is_deleted:
+            raise HTTPException(status_code=404, detail="Record not found")
+        
+        # Security/Ownership Check
+        if record.user_id != current_user.id and current_user.role != UserRole.ADMIN:
+            logger.warning(f"record: unauthorized_update_attempt record_id={record_id} user_id={current_user.id}")
+            raise HTTPException(status_code=403, detail="Not authorized to update this record")
+
+        updated = await record_repository.update(db, record_id, update_data)
+        await cache_service.delete(f"dashboard:summary:{record.user_id}")
+        
+        logger.info(f"record: updated record_id={record_id}")
+        return updated
+
+    async def delete_record(self, db: AsyncSession, record_id: int, current_user: User) -> bool:
+        """Soft delete a record (Admin or Owner)."""
+        record = await record_repository.get_by_id(db, record_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Record not found")
+
+        # Security/Ownership Check
+        if record.user_id != current_user.id and current_user.role != UserRole.ADMIN:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this record")
+
+        success = await record_repository.soft_delete(db, record_id)
+        if success:
+            await cache_service.delete(f"dashboard:summary:{record.user_id}")
+            logger.info(f"record: soft_deleted record_id={record_id}")
+        return success
 
 
-def delete_record(db: Session, record_id: str, current_user: User):
-    """Soft-delete with ownership check and Cache Invalidation."""
-    scope = get_data_scope(current_user)
-    record = record_repository.get_record_by_id(db, record_id, user_id=scope)
-    if not record:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"message": "Record not found", "code": "RECORD_NOT_FOUND"},
-        )
-
-    owner_id = record.created_by
-    record_repository.soft_delete_record(db, record, actor_id=current_user.id)
-    cache_service.invalidate_prefix(f"dashboard_summary_{owner_id}")
-    cache_service.invalidate_prefix(f"dashboard_categories_{owner_id}")
-    cache_service.invalidate_prefix(f"dashboard_trends_{owner_id}")
-    cache_service.invalidate_prefix("dashboard_summary_None")
-    cache_service.invalidate_prefix("dashboard_categories_None")
-    cache_service.invalidate_prefix("dashboard_trends_None")
-    return {"detail": "Record deleted successfully"}
+record_service = RecordService()

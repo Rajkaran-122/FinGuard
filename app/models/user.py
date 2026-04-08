@@ -1,50 +1,60 @@
 """
 User ORM Model
-===============
-Represents system users with role-based access control.
+==============
+Represents system users with role-based access control using SQLAlchemy 2.0 style.
 """
 
-import uuid
 import enum
 from datetime import datetime, timezone
+from typing import List, Optional
 
-from sqlalchemy import Column, String, Boolean, DateTime, Enum, Index, JSON
+from sqlalchemy import String, DateTime, Enum, Index
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 
 class UserRole(str, enum.Enum):
     """User roles for RBAC enforcement."""
-    VIEWER = "viewer"
-    ANALYST = "analyst"
-    ADMIN = "admin"
+    VIEWER = "VIEWER"
+    ANALYST = "ANALYST"
+    ADMIN = "ADMIN"
+
+
+class UserStatus(str, enum.Enum):
+    """User operational status."""
+    ACTIVE = "ACTIVE"
+    INACTIVE = "INACTIVE"
+    SUSPENDED = "SUSPENDED"
 
 
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    name = Column(String(255), nullable=False)
-    email = Column(String(255), nullable=False, unique=True)
-    password_hash = Column(String(255), nullable=False)
-    role = Column(Enum(UserRole), nullable=False, default=UserRole.VIEWER)
-    permissions = Column(JSON, nullable=False, default=list)
-    is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    first_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    last_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.VIEWER, nullable=False)
+    status: Mapped[UserStatus] = mapped_column(Enum(UserStatus), default=UserStatus.ACTIVE, nullable=False)
+    
+    # Audit timestamps
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
-    updated_at = Column(
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
 
-    # Indexes
-    __table_args__ = (
-        Index("idx_users_email", "email"),
-    )
+    # Relationships
+    financial_records: Mapped[List["FinancialRecord"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    refresh_tokens: Mapped[List["RefreshToken"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    audit_logs: Mapped[List["AuditLog"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
-        return f"<User {self.email} role={self.role.value}>"
+        return f"<User {self.email} role={self.role}>"

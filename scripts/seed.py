@@ -1,115 +1,132 @@
 """
-Seed script to populate initial data for testing.
+Database Seed Script
+====================
+Populates the database with initial users and realistic financial records.
+Generates 180+ days of historical data for analytics demonstration.
 """
-import sys
-import os
-from datetime import timedelta, date
-from decimal import Decimal
+
+import asyncio
 import random
+from datetime import datetime, date, timedelta, timezone
+from decimal import Decimal
 
-# Add project root to python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from app.core.database import AsyncSessionLocal, engine, Base
+from app.models.user import User, UserRole, UserStatus
+from app.models.record import FinancialRecord, TransactionType, Category
+from app.core.security import security_manager
 
-from app.core.database import SessionLocal
-from app.models.user import User, UserRole
-from app.models.record import FinancialRecord, RecordType
-from app.core.security import hash_password
 
-import alembic.config
-import alembic.command
-
-def seed_database():
-    print("Applying database migrations if they don't exist...")
-    # Initialize alembic config
-    alembic_cfg = alembic.config.Config("alembic.ini")
-    alembic.command.upgrade(alembic_cfg, "head")
+async def seed_data():
+    """Main seeding logic."""
+    print("info: starting_seed")
     
-    db = SessionLocal()
+    # Optional: Clear tables first (Development only!)
+    # async with engine.begin() as conn:
+    #     await conn.run_sync(Base.metadata.drop_all)
+    #     await conn.run_sync(Base.metadata.create_all)
 
-    print("Checking if admin exists...")
-    admin = db.query(User).filter(User.email == "admin@finance.dev").first()
-    if not admin:
-        print("Creating admin user...")
-        admin = User(
-            name="Admin User",
-            email="admin@finance.dev",
-            password_hash=hash_password("Admin@123"),
-            role=UserRole.ADMIN,
-            permissions=["dashboard:view", "records:read", "records:write", "users:manage"]
-        )
-        db.add(admin)
-        db.commit()
-        db.refresh(admin)
-    else:
-        print("Admin user already exists.")
+    async with AsyncSessionLocal() as db:
+        # 1. Create Users
+        users_to_create = [
+            {
+                "email": "admin@finguard.com",
+                "first_name": "System",
+                "last_name": "Administrator",
+                "password": "Admin@123",
+                "role": UserRole.ADMIN,
+            },
+            {
+                "email": "analyst@finguard.com",
+                "first_name": "Financial",
+                "last_name": "Analyst",
+                "password": "Analyst@123",
+                "role": UserRole.ANALYST,
+            },
+            {
+                "email": "viewer@finguard.com",
+                "first_name": "Casual",
+                "last_name": "Viewer",
+                "password": "Viewer@123",
+                "role": UserRole.VIEWER,
+            }
+        ]
 
-    print("Checking if analyst exists...")
-    analyst = db.query(User).filter(User.email == "analyst@finance.dev").first()
-    if not analyst:
-        print("Creating analyst user...")
-        analyst = User(
-            name="Analyst User",
-            email="analyst@finance.dev",
-            password_hash=hash_password("Analyst@123"),
-            role=UserRole.ANALYST,
-            permissions=["dashboard:view", "records:read"]
-        )
-        db.add(analyst)
-        db.commit()
-    
-    print("Checking if viewer exists...")
-    viewer = db.query(User).filter(User.email == "viewer@finance.dev").first()
-    if not viewer:
-        print("Creating viewer user...")
-        viewer = User(
-            name="Viewer User",
-            email="viewer@finance.dev",
-            password_hash=hash_password("Viewer@123"),
-            role=UserRole.VIEWER,
-            permissions=["dashboard:view"]
-        )
-        db.add(viewer)
-        db.commit()
+        created_users = []
+        for u_data in users_to_create:
+            # Check if exists
+            import sqlalchemy as sa
+            res = await db.execute(sa.select(User).where(User.email == u_data["email"]))
+            if res.scalar_one_or_none():
+                print(f"info: skip_existing_user email={u_data['email']}")
+                continue
 
-    print("Checking records...")
-    record_count = db.query(FinancialRecord).count()
-    if record_count < 50:
-        print("Seeding records...")
-        categories_income = ["Salary", "Consulting", "Investment", "Bonus"]
-        categories_expense = ["Rent", "Travel", "Utilities", "Food", "Marketing", "Insurance", "Software"]
+            password = u_data.pop("password")
+            user = User(**u_data, hashed_password=security_manager.get_password_hash(password))
+            db.add(user)
+            created_users.append(user)
         
-        records_to_add = []
-        for i in range(50 - record_count):
-            is_income = random.random() > 0.6
-            rec_type = RecordType.INCOME if is_income else RecordType.EXPENSE
-            cat = random.choice(categories_income) if is_income else random.choice(categories_expense)
-            amt = round(random.uniform(50.0, 5000.0), 2)
-            # random date within last 180 days
-            days_ago = random.randint(0, 180)
-            rec_date = date.today() - timedelta(days=days_ago)
+        await db.commit()
+        for u in created_users: await db.refresh(u)
+
+        # 2. Generate Records for Analyst
+        analyst = next((u for u in created_users if u.role == UserRole.ANALYST), None)
+        if not analyst:
+            # Try to fetch existing if skipped
+            res = await db.execute(sa.select(User).where(User.role == UserRole.ANALYST))
+            analyst = res.scalar_one_or_none()
+
+        if analyst:
+            print(f"info: seeding_records user_id={analyst.id}")
             
-            record = FinancialRecord(
-                amount=Decimal(str(amt)),
-                type=rec_type,
-                category=cat,
-                date=rec_date,
-                notes=f"Sample {cat} record",
-                created_by=admin.id
-            )
-            records_to_add.append(record)
-        
-        db.add_all(records_to_add)
-        db.commit()
-        print(f"Added {50 - record_count} records.")
-    else:
-        print("Records already populated.")
+            categories_income = [Category.SALARY, Category.BUSINESS, Category.INVESTMENT]
+            categories_expense = [
+                Category.FOOD, Category.TRANSPORT, Category.UTILITIES,
+                Category.ENTERTAINMENT, Category.HEALTHCARE, Category.SHOPPING
+            ]
+            
+            records = []
+            now = datetime.now()
+            
+            # Seed 6 months of data
+            for i in range(180):
+                current_date = (now - timedelta(days=i)).date()
+                
+                # Randomized transactions per day
+                num_tx = random.choices([0, 1, 2, 3], weights=[40, 40, 15, 5])[0]
+                
+                for _ in range(num_tx):
+                    is_income = random.random() < 0.25 # 25% chance of income
+                    
+                    if is_income:
+                        type = TransactionType.INCOME
+                        cat = random.choice(categories_income)
+                        amount = Decimal(random.randint(2000, 8000))
+                        desc = f"Revenue from {cat.value}"
+                    else:
+                        type = TransactionType.EXPENSE
+                        cat = random.choice(categories_expense)
+                        amount = Decimal(random.randint(5, 500))
+                        desc = f"Payment for {cat.value}"
 
-    db.close()
-    print("Seed complete.")
-    print("\nCredentials:")
-    print("Admin: admin@finance.dev / Admin@123")
-    print("Analyst: analyst@finance.dev / Analyst@123")
-    print("Viewer: viewer@finance.dev / Viewer@123")
+                    records.append(FinancialRecord(
+                        user_id=analyst.id,
+                        amount=amount,
+                        type=type,
+                        category=cat,
+                        date=current_date,
+                        description=desc
+                    ))
+
+            db.add_all(records)
+            await db.commit()
+            print(f"info: seed_complete total_records={len(records)}")
+
 
 if __name__ == "__main__":
-    seed_database()
+    asyncio.run(seed_data())
+    print("\n" + "="*30)
+    print("Credentials:")
+    print("Admin: admin@finguard.com / Admin@123")
+    print("Analyst: analyst@finguard.com / Analyst@123")
+    print("Viewer: viewer@finguard.com / Viewer@123")
+    print("="*30)

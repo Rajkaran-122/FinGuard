@@ -4,6 +4,7 @@ Authentication Pydantic Schemas
 Models for tokens and login requests.
 """
 
+from typing import Optional
 from pydantic import BaseModel, ConfigDict
 from app.schemas.user import UserResponse
 

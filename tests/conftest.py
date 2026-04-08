@@ -100,3 +100,36 @@ async def admin_token(admin_user: User) -> str:
 def admin_headers(admin_token: str):
     """Returns Auth headers block for test client."""
     return {"Authorization": f"Bearer {admin_token}"}
+
+
+@pytest_asyncio.fixture(scope="function")
+async def viewer_user(db_session: AsyncSession) -> User:
+    """Creates a mock viewer user in DB."""
+    user = User(
+        first_name="Viewer",
+        last_name="Test",
+        email="viewer_test@finance.dev",
+        hashed_password=security_manager.get_password_hash("Viewer@123"),
+        role=UserRole.VIEWER,
+        status=UserStatus.ACTIVE
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+    return user
+
+
+@pytest_asyncio.fixture(scope="function")
+async def viewer_token(viewer_user: User) -> str:
+    """Returns JWT access token for the viewer user."""
+    return security_manager.create_access_token({
+        "sub": str(viewer_user.id), 
+        "email": viewer_user.email,
+        "role": viewer_user.role.value
+    })
+
+
+@pytest_asyncio.fixture(scope="function")
+def viewer_headers(viewer_token: str):
+    """Returns Auth headers block for viewer client."""
+    return {"Authorization": f"Bearer {viewer_token}"}

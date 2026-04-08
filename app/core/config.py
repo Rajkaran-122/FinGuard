@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     # CORS & Security
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8080"
     BCRYPT_ROUNDS: int = 12
+    IDEMPOTENCY_TTL_SECONDS: int = 86400  # 24 hours
 
     # Logging
     LOG_LEVEL: str = "INFO"

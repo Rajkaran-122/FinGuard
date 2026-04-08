@@ -73,3 +73,24 @@ class SecurityManager:
 
 # Singleton instance
 security_manager = SecurityManager()
+
+# Functional aliases for backward compatibility and convenience
+def get_password_hash(password: str) -> str:
+    return security_manager.get_password_hash(password)
+
+def hash_password(password: str) -> str:
+    """Alias for get_password_hash to support legacy tests."""
+    return get_password_hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return security_manager.verify_password(plain_password, hashed_password)
+
+def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
+    return security_manager.create_access_token(data, expires_delta)
+
+def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
+    """Helper for decoding access tokens, returns None on failure instead of raising."""
+    try:
+        return security_manager.verify_token(token, "access")
+    except HTTPException:
+        return None

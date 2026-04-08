@@ -21,7 +21,7 @@ async def test_login_invalid_credentials(client):
         "password": "wrongpassword"
     })
     assert response.status_code == 401
-    assert "Invalid email or password" in response.json()["message"]
+    assert "Incorrect email or password" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -29,13 +29,10 @@ async def test_admin_get_users(client, admin_headers):
     """Test admin can list users."""
     response = await client.get("/api/v1/users", headers=admin_headers)
     assert response.status_code == 200
-    # Unwrap from ResponseWrapper
     payload = response.json()
-    assert payload["status"] == "success"
-    data = payload["data"]
-    assert "users" in data
-    assert "total" in data
-    assert data["total"] >= 1  # The admin user from fixture
+    assert "items" in payload
+    assert "total" in payload
+    assert payload["total"] >= 1  # The admin user from fixture
 
 
 @pytest.mark.asyncio
@@ -43,20 +40,20 @@ async def test_idempotent_record_creation(client, admin_headers):
     """Repeated POST with same Idempotency-Key returns same record without duplicates."""
     record_payload = {
         "amount": 123.45,
-        "type": "income",
-        "category": "IdemTest",
+        "type": "INCOME",
+        "category": "OTHER",
         "date": "2025-02-02",
-        "notes": "First post"
+        "description": "First post"
     }
     headers = {**admin_headers, "Idempotency-Key": "idem-key-1"}
 
     first = await client.post("/api/v1/records", json=record_payload, headers=headers)
     assert first.status_code == 201
-    first_id = first.json()["data"]["id"]
+    first_id = first.json()["id"]
 
     second = await client.post("/api/v1/records", json=record_payload, headers=headers)
     assert second.status_code == 201
-    second_id = second.json()["data"]["id"]
+    second_id = second.json()["id"]
 
     assert first_id == second_id
 
@@ -68,10 +65,10 @@ async def test_idempotent_conflict_on_payload_change(client, admin_headers):
 
     base_payload = {
         "amount": 200.00,
-        "type": "income",
-        "category": "Base",
+        "type": "INCOME",
+        "category": "OTHER",
         "date": "2025-03-03",
-        "notes": "Base payload"
+        "description": "Base payload"
     }
     alt_payload = {**base_payload, "amount": 250.00}
 
@@ -88,10 +85,10 @@ async def test_admin_create_and_summary_record(client, admin_headers):
     # Create income record
     record_payload = {
         "amount": 1500.50,
-        "type": "income",
-        "category": "Salary",
+        "type": "INCOME",
+        "category": "SALARY",
         "date": "2025-01-15",
-        "notes": "Test salary"
+        "description": "Test salary"
     }
     response = await client.post(
         "/api/v1/records",
@@ -102,20 +99,15 @@ async def test_admin_create_and_summary_record(client, admin_headers):
     
     # Unwrap creation response
     creation_payload = response.json()
-    assert creation_payload["status"] == "success"
-    record_data = creation_payload["data"]
-    assert record_data["amount"] == 1500.50
-    assert record_data["type"] == "income"
+    assert creation_payload["amount"] == 1500.50
+    assert creation_payload["type"] == "INCOME"
 
     # Fetch summary
     response_summary = await client.get("/api/v1/dashboard/summary", headers=admin_headers)
     assert response_summary.status_code == 200
     
-    # Unwrap summary response
-    summary_payload = response_summary.json()
-    assert summary_payload["status"] == "success"
-    summary_data = summary_payload["data"]
-
+    # Current API returns Summary directly
+    summary_data = response_summary.json()
     assert summary_data["total_income"] == 1500.50
     assert summary_data["record_count"] == 1
 
@@ -137,10 +129,10 @@ async def test_viewer_cannot_see_admin_records(client, admin_headers, viewer_hea
     # Admin creates a record
     record_payload = {
         "amount": 9999.99,
-        "type": "income",
-        "category": "Admin Secret",
+        "type": "INCOME",
+        "category": "OTHER",
         "date": "2025-06-01",
-        "notes": "Confidential admin record"
+        "description": "Confidential admin record"
     }
     create_response = await client.post(
         "/api/v1/records",
@@ -148,7 +140,7 @@ async def test_viewer_cannot_see_admin_records(client, admin_headers, viewer_hea
         headers={**admin_headers, "Idempotency-Key": "test-admin-secret"},
     )
     assert create_response.status_code == 201
-    admin_record_id = create_response.json()["data"]["id"]
+    admin_record_id = create_response.json()["id"]
 
     # Viewer tries to access admin's record by UUID — should get 404 (not 403)
     viewer_response = await client.get(f"/api/v1/records/{admin_record_id}", headers=viewer_headers)
@@ -164,8 +156,8 @@ async def test_viewer_sees_only_own_records_in_list(client, admin_headers, viewe
     await client.post(
         "/api/v1/records",
         json={
-            "amount": 5000.00, "type": "expense", "category": "Admin Only",
-            "date": "2025-07-01", "notes": "Should not appear for viewer"
+            "amount": 5000.00, "type": "EXPENSE", "category": "OTHER",
+            "date": "2025-07-01", "description": "Should not appear for viewer"
         },
         headers={**admin_headers, "Idempotency-Key": "test-admin-only"},
     )
@@ -173,7 +165,7 @@ async def test_viewer_sees_only_own_records_in_list(client, admin_headers, viewe
     # Viewer lists their records — should see 0 (they haven't created any)
     viewer_list = await client.get("/api/v1/records", headers=viewer_headers)
     assert viewer_list.status_code == 200
-    assert viewer_list.json()["data"]["total"] == 0
+    assert viewer_list.json()["total"] == 0
 
 
 @pytest.mark.asyncio
@@ -185,8 +177,8 @@ async def test_viewer_summary_is_scoped(client, admin_headers, viewer_headers):
     await client.post(
         "/api/v1/records",
         json={
-            "amount": 10000.00, "type": "income", "category": "Admin Revenue",
-            "date": "2025-08-01", "notes": "Admin only income"
+            "amount": 10000.00, "type": "INCOME", "category": "BUSINESS",
+            "date": "2025-08-01", "description": "Admin only income"
         },
         headers={**admin_headers, "Idempotency-Key": "test-admin-revenue"},
     )
@@ -195,6 +187,6 @@ async def test_viewer_summary_is_scoped(client, admin_headers, viewer_headers):
     viewer_summary = await client.get("/api/v1/dashboard/summary", headers=viewer_headers)
     assert viewer_summary.status_code == 200
     
-    summary_data = viewer_summary.json()["data"]
+    summary_data = viewer_summary.json()
     assert summary_data["total_income"] == 0.0
     assert summary_data["record_count"] == 0

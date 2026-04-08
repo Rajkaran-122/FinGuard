@@ -1,21 +1,25 @@
 services:
   - type: web
     name: finguard-api
-    env: python
-    buildCommand: "pip install -r requirements.txt && alembic upgrade head"
-    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    env: docker
+    plan: free
+    healthCheckPath: /health
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.12.0
+      - key: DATABASE_URL
+        fromDatabase:
+          name: finguard-db
+          property: connectionString
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_EXPIRY_HOURS
-        value: 12
+        value: 24
       - key: ENVIRONMENT
         value: production
-      - key: DATABASE_URL
-        value: sqlite:////data/finance.db
-    disk:
-      name: finguard-data
-      mountPath: /data
-      sizeGB: 1
+      - key: CORS_ORIGINS
+        value: "*" # Recommended: Update this with your frontend URL
+
+  - type: database
+    name: finguard-db
+    plan: free
+    databaseName: finguard
+    user: finguard_admin

@@ -126,5 +126,43 @@ class FinancialRecordRepository(BaseRepository[FinancialRecord]):
         result = await db.execute(stmt)
         return [{"category": r.category, "total": r.total, "count": r.count} for r in result.all()]
 
+    async def get_monthly_trends_bulk(
+        self, db: AsyncSession, user_id: int, start_date: date
+    ) -> List[dict]:
+        """
+        Retrieves monthly income vs expense trends in a single aggregation.
+        Efficiently groups by month/year.
+        """
+        # SQLite: strftime('%Y-%m', date)
+        # Postgres: to_char(date, 'YYYY-MM')
+        # Here we use a more generic group by if possible, or just dialect specific.
+        # For simplicity and performance, we'll use func.strftime as it's common in local dev.
+        # In production (Postgres), to_char is better.
+        
+        # Dialect-agnostic approach using extract
+        stmt = (
+            select(
+                func.extract("year", FinancialRecord.date).label("year"),
+                func.extract("month", FinancialRecord.date).label("month"),
+                FinancialRecord.type,
+                func.sum(FinancialRecord.amount).label("total")
+            )
+            .where(
+                and_(
+                    FinancialRecord.user_id == user_id,
+                    FinancialRecord.is_deleted == False,
+                    FinancialRecord.date >= start_date
+                )
+            )
+            .group_by("year", "month", FinancialRecord.type)
+            .order_by("year", "month")
+        )
+        
+        result = await db.execute(stmt)
+        return [
+            {"year": int(r.year), "month": int(r.month), "type": r.type, "total": r.total} 
+            for r in result.all()
+        ]
+
 
 record_repository = FinancialRecordRepository()

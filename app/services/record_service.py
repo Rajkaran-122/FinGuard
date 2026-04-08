@@ -15,6 +15,7 @@ from app.models.record import FinancialRecord, TransactionType, Category
 from app.models.user import User, UserRole
 from app.repositories.record_repository import record_repository
 from app.services.cache_service import cache_service
+from app.services.audit_service import audit_service
 from app.core.logging import logger
 
 
@@ -46,6 +47,11 @@ class RecordService:
         # Invalidate dashboard cache immediately on mutation
         await cache_service.delete(f"dashboard:summary:{user_id}")
         
+        await audit_service.log_event(
+            db, "RECORD_CREATE", "RECORDS", user_id=user_id, 
+            new_state={"id": record.id, "amount": float(record.amount), "type": record.type}
+        )
+
         logger.info(f"record: created record_id={record.id} user_id={user_id}")
         return record
 
@@ -63,6 +69,12 @@ class RecordService:
         updated = await record_repository.update(db, record_id, update_data)
         await cache_service.delete(f"dashboard:summary:{record.user_id}")
         
+        await audit_service.log_event(
+            db, "RECORD_UPDATE", "RECORDS", user_id=current_user.id,
+            old_state={"id": record.id, "amount": float(record.amount)},
+            new_state={"amount": float(updated.amount)}
+        )
+
         logger.info(f"record: updated record_id={record_id}")
         return updated
 
@@ -79,6 +91,7 @@ class RecordService:
         success = await record_repository.soft_delete(db, record_id)
         if success:
             await cache_service.delete(f"dashboard:summary:{record.user_id}")
+            await audit_service.log_event(db, "RECORD_DELETE", "RECORDS", user_id=current_user.id, old_state={"id": record.id})
             logger.info(f"record: soft_deleted record_id={record_id}")
         return success
 

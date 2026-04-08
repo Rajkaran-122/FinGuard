@@ -14,6 +14,7 @@ from app.models.user import User, UserStatus
 from app.core.security import security_manager
 from app.repositories.user_repository import user_repository
 from app.repositories.token_repository import token_repository
+from app.services.audit_service import audit_service
 from app.core.logging import logger
 
 
@@ -26,6 +27,7 @@ class AuthService:
         """Verify email and password against DB."""
         user = await user_repository.get_by_email(db, email)
         if not user or not security_manager.verify_password(password, user.hashed_password):
+            await audit_service.log_event(db, "LOGIN_FAILURE", "AUTH", new_state={"email": email})
             return None
         if user.status != UserStatus.ACTIVE:
             logger.warning(f"auth: login_attempt_inactive_account email={email}")
@@ -59,6 +61,8 @@ class AuthService:
             "expires_at": expires_at
         })
 
+        await audit_service.log_event(db, "LOGIN_SUCCESS", "AUTH", user_id=user.id)
+
         logger.info(f"auth: login_success user_id={user.id}")
         return {
             "access_token": access_token,
@@ -88,6 +92,8 @@ class AuthService:
         # Generate new access token
         new_data = {"sub": str(user.id), "email": user.email, "role": user.role.value}
         new_access_token = security_manager.create_access_token(data=new_data)
+
+        await audit_service.log_event(db, "TOKEN_REFRESH", "AUTH", user_id=user_id)
 
         logger.info(f"auth: refresh_token_success user_id={user_id}")
         return {

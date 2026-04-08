@@ -88,30 +88,31 @@ class DashboardService:
 
     async def get_trends(self, db: AsyncSession, user_id: int, months: int = 6) -> List[Dict[str, Any]]:
         """
-        Retrieves monthly income vs expense trends.
-        Currently simulated via monthly aggregations in a loop (optimization target).
+        Retrieves monthly income vs expense trends using bulk aggregation.
         """
-        trends = []
-        now = datetime.now()
-        for i in range(months - 1, -1, -1):
-            # Calculate month range
-            target_date = now - timedelta(days=i * 30)
-            month_start = date(target_date.year, target_date.month, 1)
-            if target_date.month == 12:
-                month_end = date(target_date.year + 1, 1, 1) - timedelta(days=1)
+        start_date = (datetime.now() - timedelta(days=months * 30)).date().replace(day=1)
+        data = await record_repository.get_monthly_trends_bulk(db, user_id, start_date)
+        
+        # Format results into expected structure
+        trends_map = {}
+        for r in data:
+            period = f"{r['year']}-{r['month']:02d}"
+            if period not in trends_map:
+                trends_map[period] = {"period": period, "income": 0.0, "expenses": 0.0}
+            
+            if r["type"] == TransactionType.INCOME:
+                trends_map[period]["income"] = float(r["total"])
             else:
-                month_end = date(target_date.year, target_date.month + 1, 1) - timedelta(days=1)
+                trends_map[period]["expenses"] = float(r["total"])
+
+        # Calculate net and sort
+        results = []
+        for period in sorted(trends_map.keys()):
+            item = trends_map[period]
+            item["net"] = round(item["income"] - item["expenses"], 2)
+            results.append(item)
             
-            income = await record_repository.get_total_by_type(db, user_id, TransactionType.INCOME, month_start, month_end)
-            expenses = await record_repository.get_total_by_type(db, user_id, TransactionType.EXPENSE, month_start, month_end)
-            
-            trends.append({
-                "period": month_start.strftime("%Y-%m"),
-                "income": float(income),
-                "expenses": float(expenses),
-                "net": float(income - expenses)
-            })
-        return trends
+        return results
 
     def _calculate_growth(self, current: Decimal, previous: Decimal) -> float:
         if previous == 0:

@@ -27,23 +27,36 @@ async def lifespan(app: FastAPI):
     Enables async database table creation and cache connection.
     """
     # Startup
-    setup_logging()
-    logger.info(f"app: starting_up name={settings.APP_TITLE} version={settings.APP_VERSION}")
-    
-    # Connect to Redis
-    await cache_service.connect()
-    
-    # Tables are created via Alembic in production, 
-    # but we can ensure them here for local/dev.
-    async with engine.begin() as conn:
-        # await conn.run_sync(Base.metadata.create_all) # Optional if using Alembic
-        pass
+    try:
+        setup_logging()
+        logger.info(f"app: starting_up name={settings.APP_TITLE} version={settings.APP_VERSION}")
         
-    yield
+        # Connect to Redis
+        try:
+            await cache_service.connect()
+        except Exception as e:
+            logger.error(f"app: redis_connection_failed error={str(e)}")
+            # We continue even if redis fails, but log it
+        
+        # Dialect verification
+        logger.info(f"app: database_url_scheme={settings.DATABASE_URL.split('://')[0]}")
+        
+        async with engine.begin() as conn:
+            # Simple query to verify DB connectivity
+            import sqlalchemy as sa
+            await conn.execute(sa.text("SELECT 1"))
+            logger.info("app: database_connectivity_verified")
+            
+        yield
+        
+    except Exception as e:
+        logger.error(f"app: critical_startup_failure error={str(e)}")
+        raise
     
-    # Shutdown
-    await engine.dispose()
-    logger.info("app: shutting_down")
+    finally:
+        # Shutdown
+        await engine.dispose()
+        logger.info("app: shutting_down")
 
 
 app = FastAPI(

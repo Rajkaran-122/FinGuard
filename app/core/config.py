@@ -5,6 +5,7 @@ All environment variables are validated at startup via pydantic-settings.
 """
 
 from typing import List
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
@@ -21,6 +22,17 @@ class Settings(BaseSettings):
     # Database (AsyncPG expected for production)
     # Default is SQLite for local development
     DATABASE_URL: str = "sqlite+aiosqlite:///./finance.db"
+    
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def assemble_db_connection(cls, v: str) -> str:
+        """
+        Render provides postgres:// URLs, but SQLAlchemy Async requires 
+        postgresql+asyncpg:// format.
+        """
+        if isinstance(v, str) and v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql+asyncpg://", 1)
+        return v
     DB_ECHO: bool = False
     DB_POOL_SIZE: int = 10
     DB_MAX_OVERFLOW: int = 20

@@ -24,6 +24,15 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
     - uses: actions/checkout@v3
@@ -49,6 +58,7 @@ jobs:
     - name: Run Tests
       env:
         DATABASE_URL: postgresql+asyncpg://finance_user:finance_password@localhost:5432/finance_db
+        REDIS_URL: redis://localhost:6379/0
         ENVIRONMENT: testing
       run: |
         pytest tests/ -v --cov=app

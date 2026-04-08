@@ -7,7 +7,7 @@ Validation and response models for financial transactions.
 from datetime import datetime, date
 from decimal import Decimal
 from typing import Optional
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 
 from app.models.record import TransactionType, Category
 
@@ -43,3 +43,8 @@ class FinancialRecordResponse(FinancialRecordBase):
     updated_at: Optional[datetime]
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer("amount")
+    def serialize_amount(self, value: Decimal) -> float:
+        """Serialize Decimal amount as float for JSON responses."""
+        return float(value)

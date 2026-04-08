@@ -69,12 +69,17 @@ class CacheService:
             logger.error(f"cache: set_failed key={key} error={str(e)}")
 
     async def delete(self, key: str):
-        """Remove a key from cache."""
+        """Remove a key from cache. Fails silently if Redis is unavailable."""
         if not self._redis:
             await self.connect()
-            
-        if self._redis:
+
+        if not self._redis:
+            return
+
+        try:
             await self._redis.delete(key)
+        except Exception as e:
+            logger.error(f"cache: delete_failed key={key} error={str(e)}")
 
     async def clear_prefix(self, prefix: str):
         """Flush all keys matching a specific prefix."""

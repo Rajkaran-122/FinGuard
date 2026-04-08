@@ -27,11 +27,14 @@ class Settings(BaseSettings):
     @classmethod
     def assemble_db_connection(cls, v: str) -> str:
         """
-        Render provides postgres:// URLs, but SQLAlchemy Async requires 
-        postgresql+asyncpg:// format.
+        Render provides postgres:// or postgresql:// URLs, but SQLAlchemy Async 
+        requires postgresql+asyncpg:// format.
         """
-        if isinstance(v, str) and v.startswith("postgres://"):
-            return v.replace("postgres://", "postgresql+asyncpg://", 1)
+        if isinstance(v, str):
+            if v.startswith("postgres://"):
+                return v.replace("postgres://", "postgresql+asyncpg://", 1)
+            elif v.startswith("postgresql://") and "+asyncpg" not in v:
+                return v.replace("postgresql://", "postgresql+asyncpg://", 1)
         return v
     DB_ECHO: bool = False
     DB_POOL_SIZE: int = 10

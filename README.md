@@ -79,6 +79,22 @@ FinGuard anticipates performance challenges inherent in high-volume environments
 
 ---
 
+## 🛠️ Limitations & Future Improvements
+
+> [!TIP]
+> This section highlights awareness of production trade-offs and the roadmap for scaling this architecture.
+
+### Current Limitations
+- **In-Memory Cache**: The current implementation uses an in-memory TTL store for simplicity. In a multi-instance (load-balanced) production environment, this would be extended to a distributed caching layer like **Redis** to ensure cache consistency across nodes.
+- **Synchronous Writes**: Financial records are processed synchronously. While efficient for current volumes, this could be moved to an event-driven model if write throughput increases significantly.
+
+### Future Scale
+- **Asynchronous Aggregation**: Transition to a task-queue model (e.g., Celery/RabbitMQ) for pre-calculating heavy analytical dashboards.
+- **Database Partitioning**: Implement horizontal partitioning (sharding) by `user_id` to handle database growth beyond the capacity of a single PostgreSQL instance.
+- **Search Optimization**: Integrate a dedicated indexing engine (like Elasticsearch) for complex full-text searches across millions of financial descriptions.
+
+---
+
 ## Project Structure & Architecture
 
 ```mermaid

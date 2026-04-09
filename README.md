@@ -123,6 +123,30 @@ graph TB
     OWN --> SRV
 ```
 
+### Data Flow Diagram (DFD)
+The following diagram traces the lifecycle of financial data—from secure ingestion and idempotency validation to bounded caching and persistent storage.
+
+```mermaid
+graph LR
+    User([User/Client]) -- Credentials --> Auth[Auth Process]
+    Auth -- JWT --> User
+    
+    User -- Financial Data + Idempotency Key --> RecordGate[Idempotency Gate]
+    RecordGate -- Request Fingerprint --> Cache[(In-memory Cache)]
+    RecordGate -- Valid Mutation --> RecordService[Record Service]
+    
+    RecordService -- Audit Data --> AuditStore[(PostgreSQL Audit Log)]
+    RecordService -- Financial Record --> DB[(PostgreSQL Ledger)]
+    RecordService -- Invalidation Signal --> Cache
+    
+    User -- Query Params --> DashboardService[Dashboard Aggregator]
+    DashboardService -- Cache Lookup --> Cache
+    Cache -- Cached Result --> DashboardService
+    DashboardService -- Fallback Query --> DB
+    DB -- Aggregated Data --> DashboardService
+    DashboardService -- Filtered JSON --> User
+```
+
 **Stack:** Python 3.12 | FastAPI | SQLAlchemy | PostgreSQL | Docker | Pytest
 
 ---

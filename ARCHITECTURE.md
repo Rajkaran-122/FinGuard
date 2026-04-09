@@ -1,48 +1,63 @@
-# Architecture Decisions
+# Architecture & Design Decisions
 
-This document captures the core architectural design and trade-offs for the FinGuard backend.
+This document captures the core architectural patterns and design trade-offs implemented in the FinGuard backend.
 
-## 1. Core Architecture Pattern: Layered (N-Tier)
+## 1. Primary Pattern: N-Tier Layering
 
-The project enforces a strict, unidirectional flow of control:
-`Router ➔ Service ➔ Repository ➔ ORM/Database`
+The system enforces a strict, unidirectional flow of control to maintain a clean **Separation of Concerns (SoC)**:
+`Router (API) ➔ Service (Business Logic) ➔ Repository (Data Access) ➔ Persistence`
 
-- **Routers**: Handle HTTP, request validation (Pydantic), and Dependency Injection for authentication/authorization.
-- **Services**: House pure business logic, orchestrate cache invalidations, and enforce data scope (multi-tenancy) so business rules are separated from transport rules.
-- **Repositories**: Handle all SQLAlchemy queries. They do not know about HTTP, caches, or users — they execute parameterized SQL.
+-   **Routers (app/api/v1)**: Responsible for HTTP protocol handling, request/response validation (Pydantic), and Dependency Injection (Auth/AuthZ).
+-   **Services (app/services)**: Orchestrates business workflows, manages cache-aside logic, and enforces multi-tenant scoping. Services are agnostic of the transport layer (HTTP).
+-   **Repositories (app/repositories)**: Encapsulates all persistence logic. They execute parameterized queries and are decoupled from business rules or caching strategies.
 
-*Trade-off*: Adds some boilerplate (passing data between layers), but guarantees testability and prevents "God controllers".
+*   **Trade-off**: While layering introduces boilerplate, it guarantees modularity and testability, preventing logic leakage between transport and persistence.
 
-## 2. Database Choice: PostgreSQL
+## 2. Data Strategy & Integrity
 
-We chose PostgreSQL as the primary persistence layer over simpler alternatives like SQLite or managed multi-model NoSQL databases.
+### Persistence Layer: PostgreSQL
+Financial ecosystems demand high data integrity and consistency. PostgreSQL was chosen for its strict **ACID compliance** and advanced indexing capabilities.
 
-- **Reasoning**: Financial systems demand absolute consistency. PostgreSQL guarantees robust ACID compliance and handles complex aggregations (needed for the dashboard) exceptionally well.
-- **Why not MongoDB**: Relational data (users own records, records belong to categories) queried strictly through tabular aggregates is perfectly suited for SQL. NoSQL would force fragile application-side joins for our dashboard metrics.
-- **Local Dev / Testing**: SQLAlchemy abstracts the dialect perfectly, allowing us to drop to an in-memory SQLite database solely for lightning-fast test execution while deploying to a robust PostgreSQL setup in production.
+-   **Precision Handling**: All monetary values use the `DECIMAL` (via SQLAlchemy `Numeric`) type rather than floating-point, ensuring precision is maintained across calculations.
+-   **Schema Evolution**: Schema changes are managed via **Alembic migrations**, ensuring deterministic deployments and versioned database states.
+-   **Dialect Resilience**: The use of SQLAlchemy allows the integration test suite to utilize an ephemeral `SQLite + aiosqlite` backend while the production environment leverages `PostgreSQL + asyncpg`.
 
-## 3. Caching Strategy: Bounded Cache-Aside
+### Caching Strategy: Deterministic Cache-Aside
+Analytical queries (aggregates) are served via a bounded cache-aside pattern to reduce primary database load.
 
-Analytics queries run `COUNT()`, `SUM()`, and `GROUP BY` across thousands of records. Computing these per-request at scale would exhaust database CPU.
+-   **Memory Safety**: The `CacheManager` utilizes an LRU (Least Recently Used) eviction policy with a `maxsize` bound to prevent unbounded memory growth.
+-   **Consistency**: Cache invalidation is triggered synchronously within the service layer on write operations (`record_service`), ensuring that analytical dashboards reflect the latest state.
+-   **Evolution Path**: The cache abstraction allows a seamless swap to a distributed **Redis** implementation without modifying business logic.
 
-- **Implementation**: Bounded in-memory Cache-Aside pattern.
-- **Flow**: Dashboard reads hit the cache dict. On miss, it calculates from DB and stores with a TTL. Any write operation in the record service invalidates the specific user's dashboard cache prefixes.
-- **Evolution**: The `CacheManager` exposes a standard `.get()`, `.set()`, and `.invalidate_prefix()` API. Migrating to Redis in a distributed environment requires modifying exactly one class under `app/core/cache.py`, with zero changes to business logic.
-- **Safety**: Bounded via LRU (maxsize) to prevent unbounded memory growth at 100k+ users.
+## 3. Reliability: Idempotency Gateways
 
-## 4. Idempotency Gateways
+To handle network unpredictability and prevent duplicate state changes (e.g., double-charging), the system implements an Idempotency layer.
 
-Financial APIs cannot tolerate network-retry "double-spend" errors. The API handles network unpredictability using Idempotency Keys.
+-   **Request Fingerprinting**: All write operations are fingerprinted using a SHA-256 hash of the `Method + Path + UserID + Body`.
+-   **Processing Flow**:
+    1.  Verify if the `Idempotency-Key` exists in the persistence layer.
+    2.  Check for a fingerprint match to reject replayed bodies.
+    3.  Compute, store, and return the finalized response.
+-   **Result**: Ensures exactly-once processing for critical financial mutations.
 
-- **How it works**: Client sends an `Idempotency-Key` header with their POST payload.
-- **Protection Flow**:
-  1. Check fast in-memory cache for computed response.
-  2. Check persistent DB layer for survivability across restarts.
-  3. Attempt lock acquisition via 'pending' status row insertion.
-  4. Compare a SHA-256 fingerprint of `method + path + user_id + body` to reject modified retries.
-  5. Compute, persist 'completed' status, and return.
+## 4. Observability & Traceability
 
-## 5. Security & RBAC Middleware
+Traceability is a first-class citizen in this architecture, enabling efficient debugging in production environments.
 
-- **Role Base**: Roles (admin, analyst, viewer) map to granular permission arrays.
-- **IDOR Protection**: The system universally prevents Insecure Direct Object Reference by centralizing data scoping. Endpoints query records by injecting a `user_id` scope from `get_data_scope()`. If an unauthorized viewer requests an existing admin record by UUID, the repository naturally returns `None`, and the API produces a 404 Not Found rather than a 403 Forbidden, concealing the record's existence.
+-   **Request Tracing**: Every request is assigned a unique `X-Request-ID` (UUID) via middleware. This ID is propagated to headers and embedded in every log entry.
+-   **Structured Logging**: Utilizes `structlog` for machine-readable JSON logs in production, allowing for easy ingestion into log aggregation platforms (e.g., ELK, Datadog).
+-   **Context Injection**: The Request ID is bound to the logging context at the start of the lifecycle, ensuring that all log lines related to a specific user action are automatically correlated.
+
+## 5. System Lifecycle & Resource Management
+
+The application utilizes the **Lifespan** pattern for managing the lifecycle of external resources.
+
+-   **Connection Pooling**: Database and Redis connection pools are initialized during startup and disposed of gracefully during shutdown.
+-   **Warm-up**: Dialect verification and initial connectivity checks are performed before the API begins accepting traffic, preventing "cold boot" errors during deployment.
+
+## 6. Configuration & Environment
+
+Settings are managed via **pydantic-settings**, providing a single source of truth for configuration.
+
+-   **Early Failure**: All environment variables are validated at startup. If a required variable (like `DATABASE_URL` or `JWT_SECRET`) is missing or malformed, the application will fail to start, preventing "ghost" failures in production.
+-   **Type Safety**: Configuration is strongly typed, reducing runtime errors related to misconfigured environment flags.

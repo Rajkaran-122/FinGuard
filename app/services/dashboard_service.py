@@ -52,6 +52,9 @@ class DashboardService:
         income_growth = self._calculate_growth(curr_income, prev_income)
         expense_growth = self._calculate_growth(curr_expenses, prev_expenses)
 
+        # Total Record Count
+        record_count = await record_repository.count(db, filters={"user_id": user_id, "is_deleted": False})
+
         summary = {
             "total_income": float(total_income),
             "total_expenses": float(total_expenses),
@@ -61,7 +64,8 @@ class DashboardService:
             "previous_month_income": float(prev_income),
             "previous_month_expenses": float(prev_expenses),
             "income_growth": income_growth,
-            "expense_growth": expense_growth
+            "expense_growth": expense_growth,
+            "record_count": record_count
         }
 
         await cache_service.set(cache_key, summary, ttl=300)

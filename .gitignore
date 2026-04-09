@@ -38,7 +38,13 @@ Thumbs.db
 
 # Logs
 *.log
+test_output.txt
 
 # Distribution
 *.tar.gz
 *.whl
+
+# Legacy & Scratch
+app/routers/
+.ruff_cache/
+tests/unit/test_scope.py

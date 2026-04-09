@@ -97,13 +97,14 @@ class IdempotencyManager:
                 user_id=user_id,
                 ttl_seconds=self.ttl_seconds,
             )
-        except IntegrityError:
-            # Another request (or this one) already started or finished.
+        except (IntegrityError, Exception) as e:
             # Re-fetch to see if we should replay or conflict.
+            # We catch general Exception too because SQLite might throw ProgrammingError on binding
+            # if serialization fails, though we fixed that in the repository.
             await db.rollback()
             existing = await idempotency_repository.get_key(db, key)
             if existing:
-                if existing.request_fingerprint != fingerprint or existing.user_id != user_id:
+                if existing.request_fingerprint != fingerprint:
                     raise HTTPException(
                         status_code=status.HTTP_409_CONFLICT,
                         detail={
@@ -121,17 +122,16 @@ class IdempotencyManager:
                     )
                 return existing.response_body
             
-            # If we gets here, it means we couldn't find it even after IntegrityError, 
-            # which might happen if the other request failed and cleaned up.
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "message": "Request is already being processed",
-                    "code": "CONCURRENT_REQUEST",
-                },
-            )
-        except Exception as e:
-            await db.rollback()
+            # If we still haven't found it, it might be a transient DB error
+            if isinstance(e, IntegrityError):
+                 raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "message": "Concurrent request detected",
+                        "code": "CONCURRENT_REQUEST",
+                    },
+                )
+            
             logger.error(f"idempotency: lock_acquisition_failed error={str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

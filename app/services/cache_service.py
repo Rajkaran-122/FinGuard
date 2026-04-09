@@ -26,8 +26,12 @@ class CacheService:
         try:
             # Check if existing client is healthy and using the current loop
             if self._redis:
-                await self._redis.ping()
-                return
+                try:
+                    await self._redis.ping()
+                    return
+                except (RuntimeError, Exception):
+                    # If ping fails, the loop might be closed or connection dead
+                    self._redis = None
 
             self._redis = redis.from_url(
                 settings.REDIS_URL,
@@ -38,7 +42,8 @@ class CacheService:
             logger.info("cache: connected_to_redis")
         except Exception as e:
             # If the loop is closed or connection fails, reset client
-            if "Event loop is closed" in str(e) or isinstance(e, RuntimeError):
+            err_msg = str(e).lower()
+            if "event loop is closed" in err_msg or "runtimeerror" in err_msg:
                 self._redis = None
             logger.error(f"cache: connection_failed error={str(e)}")
             self._redis = None
@@ -55,7 +60,8 @@ class CacheService:
             data = await self._redis.get(key)
             return json.loads(data) if data else None
         except Exception as e:
-            if "Event loop is closed" in str(e):
+            err_msg = str(e).lower()
+            if "event loop is closed" in err_msg:
                 self._redis = None
             logger.error(f"cache: get_failed key={key} error={str(e)}")
             return None
@@ -75,7 +81,8 @@ class CacheService:
                 ex=ttl
             )
         except Exception as e:
-            if "Event loop is closed" in str(e):
+            err_msg = str(e).lower()
+            if "event loop is closed" in err_msg:
                 self._redis = None
             logger.error(f"cache: set_failed key={key} error={str(e)}")
 
@@ -90,7 +97,8 @@ class CacheService:
 
             await self._redis.delete(key)
         except Exception as e:
-            if "Event loop is closed" in str(e):
+            err_msg = str(e).lower()
+            if "event loop is closed" in err_msg:
                 self._redis = None
             logger.error(f"cache: delete_failed key={key} error={str(e)}")
 
@@ -107,7 +115,8 @@ class CacheService:
             if keys:
                 await self._redis.delete(*keys)
         except Exception as e:
-            if "Event loop is closed" in str(e):
+            err_msg = str(e).lower()
+            if "event loop is closed" in err_msg:
                 self._redis = None
             logger.error(f"cache: clear_prefix_failed prefix={prefix} error={str(e)}")
 

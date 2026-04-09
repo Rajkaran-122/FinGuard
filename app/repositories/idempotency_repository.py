@@ -21,11 +21,25 @@ async def get_key(db: AsyncSession, key: str) -> Optional[IdempotencyKey]:
     )
     record = result.scalar_one_or_none()
     
-    if record and record.ttl_expires_at < datetime.now(timezone.utc):
-        await db.delete(record)
-        await db.commit()
-        return None
+    now = datetime.now(timezone.utc)
+    if record and record.ttl_expires_at:
+        # Standardize awareness for SQLite compatibility
+        expires_at = record.ttl_expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+            
+        if expires_at < now:
+            await db.delete(record)
+            await db.commit()
+            return None
         
+    # Standardize response_body as a dict if it was stored as a JSON string (SQLite)
+    if record and isinstance(record.response_body, str):
+        try:
+            record.response_body = json.loads(record.response_body)
+        except (json.JSONDecodeError, TypeError):
+            pass
+            
     return record
 
 
@@ -41,12 +55,14 @@ async def save_key(
     """UPSERT: Persist response for future re-play."""
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
     
-    # We pass the dict directly; SQLAlchemy's JSON type handles serialization
+    # For SQLite compatibility, ensure response_body is a JSON string
+    stored_body = json.dumps(response_body) if isinstance(response_body, (dict, list)) else response_body
+
     record = IdempotencyKey(
         key=key,
         request_fingerprint=fingerprint,
         user_id=user_id,
-        response_body=response_body,
+        response_body=stored_body,
         status=status,
         ttl_expires_at=expires_at,
     )
@@ -78,7 +94,7 @@ async def create_lock(
         key=key,
         request_fingerprint=fingerprint,
         user_id=user_id,
-        response_body={},
+        response_body=json.dumps({}),
         status="pending",
         ttl_expires_at=expires_at,
     )

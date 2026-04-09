@@ -48,6 +48,11 @@ def get_summary(
 
     current = record_repository.get_summary_totals(db, date_from, date_to, user_id=scope)
 
+    # Ensure numeric values are floats
+    current["total_income"] = float(current.get("total_income", 0))
+    current["total_expenses"] = float(current.get("total_expenses", 0))
+    current["net_balance"] = float(current.get("total_income", 0) - current.get("total_expenses", 0))
+
     # Calculate MoM (Month-over-Month) or Period-over-Period if bounds provided
     mom_income_pct = None
     mom_expense_pct = None
@@ -58,14 +63,17 @@ def get_summary(
         prev_date_from = prev_date_to - delta
 
         prev = record_repository.get_summary_totals(db, prev_date_from, prev_date_to, user_id=scope)
+        
+        prev_income = float(prev.get("total_income", 0))
+        prev_expenses = float(prev.get("total_expenses", 0))
 
-        if prev["total_income"] > 0:
-            mom_income_pct = round(((current["total_income"] - prev["total_income"]) / prev["total_income"]) * 100, 2)
+        if prev_income > 0:
+            mom_income_pct = round(((current["total_income"] - prev_income) / prev_income) * 100, 2)
         elif current["total_income"] > 0:
             mom_income_pct = 100.0
 
-        if prev["total_expenses"] > 0:
-            mom_expense_pct = round(((current["total_expenses"] - prev["total_expenses"]) / prev["total_expenses"]) * 100, 2)
+        if prev_expenses > 0:
+            mom_expense_pct = round(((current["total_expenses"] - prev_expenses) / prev_expenses) * 100, 2)
         elif current["total_expenses"] > 0:
             mom_expense_pct = 100.0
 

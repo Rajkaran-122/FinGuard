@@ -147,6 +147,72 @@ graph LR
     DashboardService -- Filtered JSON --> User
 ```
 
+### Database ER Diagram (ERD)
+The following Entity-Relationship Diagram defines the relational schema, data types, and ownership boundaries enforced by the PostgreSQL persistence layer.
+
+```mermaid
+erDiagram
+    Users ||--o{ FinancialRecords : "owns"
+    Users ||--o{ RefreshTokens : "token_rotation"
+    Users ||--o{ AuditLogs : "activity_log"
+    
+    Users {
+        int id PK
+        string email UK
+        string hashed_password
+        string first_name
+        string last_name
+        string role "ADMIN | ANALYST | VIEWER"
+        string status "ACTIVE | INACTIVE"
+        datetime created_at
+        datetime updated_at
+    }
+
+    FinancialRecords {
+        int id PK
+        int user_id FK
+        decimal amount
+        string type "INCOME | EXPENSE"
+        string category "SALARY | FOOD etc"
+        date date
+        string description
+        bool is_deleted
+        datetime created_at
+        datetime updated_at
+    }
+
+    RefreshTokens {
+        int id PK
+        int user_id FK
+        string token UK
+        bool is_revoked
+        datetime expires_at
+        datetime created_at
+    }
+
+    AuditLogs {
+        int id PK
+        int user_id FK "can be NULL"
+        string action
+        string module
+        json old_state
+        json new_state
+        string ip_address
+        string user_agent
+        datetime created_at
+    }
+
+    IdempotencyKeys {
+        string key PK
+        string request_fingerprint
+        string user_id "Logical FK"
+        json response_body
+        string status
+        datetime ttl_expires_at
+        datetime created_at
+    }
+```
+
 **Stack:** Python 3.12 | FastAPI | SQLAlchemy | PostgreSQL | Docker | Pytest
 
 ---

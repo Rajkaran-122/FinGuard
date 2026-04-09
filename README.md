@@ -54,7 +54,7 @@ FinGuard enforces multi-tenant data isolation at the repository level to maintai
 
 ---
 
-## 🚀 Strategic System Design (Technical Depth)
+##  Strategic System Design (Technical Depth)
 
 > [!NOTE]
 > This section details the engineering rationale for evaluators looking for internal system design considerations.
@@ -79,7 +79,7 @@ FinGuard anticipates performance challenges inherent in high-volume environments
 
 ---
 
-## 🛠️ Limitations & Future Improvements
+##  Limitations & Future Improvements
 
 > [!TIP]
 > This section highlights awareness of production trade-offs and the roadmap for scaling this architecture.
